@@ -1,0 +1,33 @@
+# Ignore everything by default
+*
+
+# Allow code directory
+!code/
+!code/**
+
+# Exclude misc folders everywhere
+code/misc/
+misc/
+
+# Allow yml files in root
+!spatial_env.yml
+!spatial_environment.yml
+
+# Allow output directory structure (empty, via .gitkeep)
+!output/
+output/*
+!output/.gitkeep
+
+# Allow this file
+!.gitignore
+
+# Ignore CLAUDE.md
+CLAUDE.md
+
+# Common ignores
+*.pyc
+__pycache__/
+.ipynb_checkpoints/
+*.Rhistory
+*.RData
+Rplots.pdf

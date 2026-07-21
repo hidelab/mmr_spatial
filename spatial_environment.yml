@@ -1,0 +1,28 @@
+name: spark_spatial
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.11
+  - gxx
+  - gcc
+  - openblas
+  - libblas[build=*openblas]
+  - anndata
+  - scanpy
+  - squidpy
+  - r-base
+  - r-ggplot2
+  - r-matrix
+  - r-seurat
+  - r-hdf5r
+  - freetype
+  - r-systemfonts
+  - cairo
+  - fontconfig
+  - r-ragg
+  - r-textshaping
+  - imagemagick
+  - r-lme4
+  - r-devtools
