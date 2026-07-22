@@ -11,40 +11,19 @@ library(dplyr)
 library(tidyr)
 
 # =============================================================================
-# Parameters (modify as needed)
+# Parameters
 # =============================================================================
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "04_DEG_merged_domains")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-MIN_TOTAL_COUNTS <- 50       # Minimum total UMI counts per cell
-MIN_CELLS_PER_SAMPLE <- 10    # Minimum cells per sample-domain combo to keep
-MIN_GENES_DETECTED <- 10      # Minimum genes detected per cell
-FDR_THRESHOLD <- 0.1         # Significance threshold
-LFC_THRESHOLD <- 0.25          # Log2 fold-change threshold for labeling
-
-# Gene-level filtering (applied per domain before DESeq2)
-MIN_GENE_EXPR_FRAC <- 0.05   # Gene must be expressed in at least this fraction of cells (per domain)
-MIN_COUNTS_PER_SAMPLE <- 5   # Minimum counts a gene must have in a sample to be "detected"
-MIN_SAMPLES_EXPRESSED <- 3    # Gene must be detected in at least this many samples
-
-# Reference level for DESeq2 (DKO vs WT means WT is reference)
-REFERENCE_CONDITION <- "WT"
-TEST_CONDITION <- "DKO"
-
-# Merged domain column (created by 03_03_merge_domains.R)
-DOMAIN_COL <- "banksy_domain_merged"
-
-# Domain name mapping (matches 03_03_merge_domains_08lambda.R)
-DOMAIN_NAMES <- c(
-  "1" = "Mammary_Glands",
-  "2" = "Tumor_Core",
-  "3" = "Immune_Engulfing",
-  "4" = "Stroma"
-)
+# Merged domain column
+DOMAIN_COL <- COL_DOMAIN
 
 # =============================================================================
 # 1. Load merged-domain Seurat object
@@ -53,7 +32,7 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded merged-domain Seurat object:", ncol(seu), "cells,", nrow(seu), "genes\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$condition <- factor(seu$condition,
@@ -253,7 +232,7 @@ pb_meta <- data.frame(
   n_cells = as.numeric(group_counts[names(pb_list)]),
   stringsAsFactors = FALSE
 )
-pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), "WT", "DKO")
+pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), REFERENCE_CONDITION, TEST_CONDITION)
 rownames(pb_meta) <- pb_meta$group
 
 cat(sprintf("Pseudobulk matrix: %d genes x %d samples (after min %d cells filter)\n",
@@ -414,7 +393,7 @@ for (dom in names(all_results)) {
   top_genes <- res_df %>%
     filter(significance != "NS") %>%
     arrange(padj) %>%
-    head(20)
+    head(VOLCANO_TOP_N)
 
   p <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = significance)) +
     geom_point(alpha = 0.5, size = 0.8) +

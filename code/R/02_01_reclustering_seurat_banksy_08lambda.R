@@ -9,7 +9,9 @@ library(ggplot2)
 library(patchwork)
 library(SeuratWrappers)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "02_banksy_lambda08")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -17,11 +19,11 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
 # --- 1. Load Seurat object from previous step ----------------------------------
-seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_Tier1_seurat.rds"))
+seu <- readRDS(SEURAT_RDS)
 cat("Loaded Seurat object:", ncol(seu), "cells,", nrow(seu), "genes\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$condition <- factor(seu$condition,
@@ -55,8 +57,8 @@ seu <- FindVariableFeatures(seu, assay = expr_assay, nfeatures = 2000)
 # Uses dimx/dimy to pass coordinates directly — no FOV/image object needed.
 # lambda=0.2: moderate spatial context; lambda=0.8: strong spatial context
 # k_geom=15: local neighbors; k_geom=30: broader neighborhood
-lambdas <- c(0.8)
-k_geoms <- c(30)
+lambdas <- c(BANKSY_LAMBDA)
+k_geoms <- c(BANKSY_K_GEOM)
 
 seu <- RunBanksy(seu,
                  lambda = lambdas,
@@ -73,15 +75,15 @@ cat("Banksy features computed.\n")
 cat("Available assays:", paste(Assays(seu), collapse = ", "), "\n")
 
 # --- 5. PCA on Banksy-augmented assay ------------------------------------------
-seu <- RunPCA(seu, assay = "BANKSY", features = rownames(seu[["BANKSY"]]), npcs = 50)
+seu <- RunPCA(seu, assay = "BANKSY", features = rownames(seu[["BANKSY"]]), npcs = BANKSY_NPCS)
 
 # --- 6. Harmony batch correction across samples ---------------------------------
-seu <- RunHarmony(seu, group.by.vars = "sample", reduction.use = "pca")
+seu <- RunHarmony(seu, group.by.vars = HARMONY_GROUP_VAR, reduction.use = "pca")
 cat("Harmony correction complete.\n")
 
 # --- 7. Clustering sweep over nPCs and resolutions ------------------------------
-npc_values <- c( 30)
-resolutions <- c( 0.8)
+npc_values <- c(BANKSY_NPC_USE)
+resolutions <- c(BANKSY_RESOLUTION)
 
 for (npc in npc_values) {
   seu <- FindNeighbors(seu, reduction = "harmony", dims = 1:npc)
@@ -96,13 +98,13 @@ cat("Cluster columns created:\n")
 print(cluster_cols)
 
 # --- 8. UMAP for visualization --------------------------------------------------
-seu <- RunUMAP(seu, reduction = "harmony", dims = 1:30,
+seu <- RunUMAP(seu, reduction = "harmony", dims = 1:BANKSY_NPC_USE,
                reduction.name = "umap_banksy")
 
 # --- 9. Visualization -----------------------------------------------------------
 
-# Pick a primary clustering for plots (pc30, res 0.8 is a good balance)
-primary_clust <- "banksy_clust_pc30_res.0.8"
+# Pick a primary clustering for plots
+primary_clust <- paste0("banksy_clust_pc", BANKSY_NPC_USE, "_res.", BANKSY_RESOLUTION)
 if (!primary_clust %in% colnames(seu@meta.data)) {
   primary_clust <- cluster_cols[1]
 }
@@ -188,9 +190,9 @@ p_bar <- ggplot(ct_cond, aes(x = condition, y = proportion, fill = cluster)) +
 ggsave(file.path(OUTPUT_DIR, "barplot_cluster_by_condition.pdf"), p_bar, width = 5, height = 6)
 
 # --- 10. Save results -----------------------------------------------------------
-saveRDS(seu, file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds"))
-cat("\nSeurat object with Banksy results saved to:",
-    file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds"), "\n")
+BANKSY_RDS <- file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds")
+saveRDS(seu, BANKSY_RDS)
+cat("\nSeurat object with Banksy results saved to:", BANKSY_RDS, "\n")
 
 # Export cluster assignments
 cluster_df <- seu@meta.data[, c("sample", "condition", "Tier1_celltype", cluster_cols)]

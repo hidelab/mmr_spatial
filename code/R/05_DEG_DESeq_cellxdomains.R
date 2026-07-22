@@ -18,52 +18,38 @@ library(tidyr)
 # =============================================================================
 # Parameters
 # =============================================================================
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 BASE_OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "05_DEG_across_domains")
 dir.create(BASE_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-# Cell-level QC filters
-MIN_TOTAL_COUNTS <- 50
-MIN_CELLS_PER_SAMPLE <- 10
-MIN_GENES_DETECTED <- 10
-FDR_THRESHOLD <- 0.1
-LFC_THRESHOLD <- 0.25
+# Cell types of interest (immune subtypes for domain DE)
+CELLTYPES_OF_INTEREST <- IMMUNE_CELLTYPES_DE
 
-# Gene-level filtering
-MIN_GENE_EXPR_FRAC <- 0.05
-MIN_COUNTS_PER_SAMPLE <- 5
-MIN_SAMPLES_EXPRESSED <- 3
+# Domain column
+DOMAIN_COL <- COL_DOMAIN
 
-# --- Cell types of interest ---
-CELLTYPES_OF_INTEREST <- c(
-  "CD8+ T",
-  "Treg",
-  "DC (Ccr7+)",
-  "pDC",
-  "NK",
-  "Macrophage (Cxcl16+)",
-  "cDC1",
-  "Neutrophil"
-)
-
-# Domain column and names
-DOMAIN_COL <- "banksy_domain_merged"
-DOMAIN_NAMES <- c(
+# Domain names for this analysis (exclude Mammary Glands — only compare Tumor Core,
+# Immune Engulfing, Stroma)
+DOMAIN_NAMES_SUB <- c(
   "2" = "Tumor_Core",
   "3" = "Immune_Engulfing",
   "4" = "Stroma"
 )
 
-# Pairwise comparisons: test vs reference
-# Positive LFC = higher in test domain
-COMPARISONS <- list(
-  list(test = "Tumor_Core", ref = "Immune_Engulfing", test_id = "2", ref_id = "3"),
-  list(test = "Immune_Engulfing", ref = "Stroma", test_id = "3", ref_id = "4"),
-  list(test = "Tumor_Core", ref = "Stroma", test_id = "2", ref_id = "4")
-)
+# Build pairwise comparisons from DOMAIN_COMPARISONS (00_parameters.R)
+COMPARISONS <- lapply(DOMAIN_COMPARISONS, function(pair) {
+  # pair is c("Tumor_Core", "Immune_Engulfing")
+  test_name <- pair[1]
+  ref_name  <- pair[2]
+  test_id   <- names(DOMAIN_NAMES_SUB)[DOMAIN_NAMES_SUB == test_name]
+  ref_id    <- names(DOMAIN_NAMES_SUB)[DOMAIN_NAMES_SUB == ref_name]
+  list(test = test_name, ref = ref_name, test_id = test_id, ref_id = ref_id)
+})
 
 # =============================================================================
 # 1. Load Seurat object
@@ -72,7 +58,7 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells,", nrow(seu), "genes\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$condition <- factor(seu$condition,
@@ -121,7 +107,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
               100 * (n_before - n_after) / n_before))
 
   # Keep only relevant domains (Tumor Core, Immune Engulfing, Stroma)
-  seu_ct <- subset(seu_ct, subset = domain %in% names(DOMAIN_NAMES))
+  seu_ct <- subset(seu_ct, subset = domain %in% names(DOMAIN_NAMES_SUB))
   cat(sprintf("  After domain filter (domains 2,3,4): %d cells\n", ncol(seu_ct)))
 
   if (ncol(seu_ct) < MIN_CELLS_PER_SAMPLE * 2) {
@@ -176,9 +162,9 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
     n_cells = as.numeric(group_counts[names(pb_list)]),
     stringsAsFactors = FALSE
   )
-  pb_meta$domain_name <- DOMAIN_NAMES[pb_meta$domain]
-  pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), "WT", "DKO")
-  pb_meta$condition <- factor(pb_meta$condition, levels = c("WT", "DKO"))
+  pb_meta$domain_name <- DOMAIN_NAMES_SUB[pb_meta$domain]
+  pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), REFERENCE_CONDITION, TEST_CONDITION)
+  pb_meta$condition <- factor(pb_meta$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
   rownames(pb_meta) <- pb_meta$group
 
   cat(sprintf("Pseudobulk matrix: %d genes x %d samples (after min %d cells filter)\n",
@@ -338,7 +324,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
     top_genes <- res_df %>%
       filter(significance != "NS") %>%
       arrange(padj) %>%
-      head(20)
+      head(VOLCANO_TOP_N)
 
     # Color values
     sig_levels <- unique(res_df$significance)

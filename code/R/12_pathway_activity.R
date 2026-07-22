@@ -5,19 +5,20 @@ library(dplyr)
 library(org.Hs.eg.db)
 library(AnnotationDbi)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
 
 # Directory to the pathway gene membership
-pathways2 <- readRDS(file.path(PROJECT_DIR, 'input/MSigDBPathGeneTab2024.RDS'))
-pathway_displayNames <- read.csv("input/MSigDB_display_names_v2024.csv")
-displayNames <- pathway_displayNames[,c("standard_name","display_name")]
+pathways2 <- readRDS(MSIGDB_PATHWAYS)
+pathway_displayNames <- read.csv(MSIGDB_NAMES)
+displayNames <- pathway_displayNames[, c("standard_name", "display_name")]
 
 # List all pseudobulk domain profiles
 pseudobulk_dir <- file.path(PROJECT_DIR, "output/R/04_DEG_merged_domains/pseudobulk_profiles")
 pseudobulk_files <- list.files(pseudobulk_dir, pattern = "pseudobulk_domain_.*\\.csv", full.names = TRUE)
 
 # Output directory for DE pathways
-out.dir0 <- file.path(PROJECT_DIR, 'output/R/12_DE_pathways/')
+out.dir0 <- file.path(PROJECT_DIR, "output/R/12_DE_pathways/")
 if (!dir.exists(out.dir0)) dir.create(out.dir0, recursive = TRUE)
 
 # --- Helper: Convert mouse gene symbols to human ENSEMBL IDs ---
@@ -81,7 +82,7 @@ for (pb_file in pseudobulk_files) {
     )
 
     # Ensure condition is a factor with WT as reference
-    covariates$condition <- factor(covariates$condition, levels = c("WT", "DKO"))
+    covariates$condition <- factor(covariates$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
 
     cat("Samples:", paste(colnames(genes.counts2), collapse = ", "), "\n")
     cat("Conditions:", paste(levels(covariates$condition), collapse = " vs "), "\n")
@@ -94,8 +95,8 @@ for (pb_file in pseudobulk_files) {
         condition = "condition",
         outDir = out.dir0,
         saveOutName = paste0(domain_name, "_DEP_DKO_vs_WT.RDS"),
-        minPathSize = 10,
-        contrastConds = "conditionDKO-conditionWT"
+        minPathSize = MIN_PATH_SIZE,
+        contrastConds = paste0("condition", TEST_CONDITION, "-condition", REFERENCE_CONDITION)
     )
 
     # Save DE pathway results
@@ -126,14 +127,6 @@ library(ggplot2)
 library(forcats)
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-# Domain colors for the bar plot
-domain_colors <- c(
-    "1_Mammary_Glands"  = "#FFB000",
-    "2_Tumor_Core"      = "#80B1D3",
-    "3_Immune_Engulfing" = "#beaed4",
-    "4_Stroma"          = "#FB8072"
-)
-
 # Read all DE pathway results and combine
 all_dep_results <- list()
 for (pb_file in pseudobulk_files) {
@@ -153,15 +146,15 @@ for (domain_name in names(all_dep_results)) {
     dep <- all_dep_results[[domain_name]]
 
     # Filter to adj.P.Val < 0.1
-    sig_paths <- dep[dep$adj.P.Val < 0.1, ]
+    sig_paths <- dep[dep$adj.P.Val < FDR_THRESHOLD, ]
 
     if (nrow(sig_paths) == 0) {
-        cat("No significant pathways (adj.P.Val < 0.1) for domain:", domain_name, "\n")
+        cat(sprintf("No significant pathways (adj.P.Val < %.2f) for domain: %s\n", FDR_THRESHOLD, domain_name))
         next
     }
 
-    # Take top 30 by P.Value (already ordered)
-    sig_paths <- head(sig_paths, 40)
+    # Take top pathways by P.Value (already ordered)
+    sig_paths <- head(sig_paths, TOP_PATHWAYS_PLOT)
 
     # Use display_name as label; fall back to standard_name if missing
     sig_paths$label <- ifelse(
@@ -170,10 +163,10 @@ for (domain_name in names(all_dep_results)) {
         sig_paths$display_name
     )
 
-    # Truncate long pathway names to 70 characters
-    if (any(stringr::str_length(sig_paths$label) > 70)) {
-        long_inds <- stringr::str_length(sig_paths$label) > 70
-        sig_paths[long_inds, ]$label <- stringr::str_sub(sig_paths[long_inds, ]$label, 1, 70)
+    # Truncate long pathway names
+    if (any(stringr::str_length(sig_paths$label) > PATHWAY_NAME_TRUNC)) {
+        long_inds <- stringr::str_length(sig_paths$label) > PATHWAY_NAME_TRUNC
+        sig_paths[long_inds, ]$label <- stringr::str_sub(sig_paths[long_inds, ]$label, 1, PATHWAY_NAME_TRUNC)
         sig_paths[long_inds, ]$label <- paste0(sig_paths[long_inds, ]$label, "*")
     }
 
@@ -267,7 +260,7 @@ for (pb_file in pseudobulk_files) {
     dep <- read.csv(res_file, row.names = 1)
 
     # Filter to significant pathways
-    sig_paths <- dep[dep$adj.P.Val < 0.1, ]
+    sig_paths <- dep[dep$adj.P.Val < FDR_THRESHOLD, ]
     if (nrow(sig_paths) == 0) next
 
     # Create output subdirectory for heatmaps
@@ -317,8 +310,8 @@ for (pb_file in pseudobulk_files) {
 
         # Truncate label for plot title
         plot_title <- pathway_label
-        if (nchar(plot_title) > 70) {
-            plot_title <- paste0(substr(plot_title, 1, 70), "*")
+        if (nchar(plot_title) > PATHWAY_NAME_TRUNC) {
+            plot_title <- paste0(substr(plot_title, 1, PATHWAY_NAME_TRUNC), "*")
         }
 
         # Generate heatmap

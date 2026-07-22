@@ -12,38 +12,25 @@ library(dplyr)
 library(tidyr)
 
 # =============================================================================
-# Parameters (modify as needed)
+# Parameters
 # =============================================================================
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "03_DEG_pseudobulk")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-MIN_TOTAL_COUNTS <- 50       # Minimum total UMI counts per cell
-MIN_CELLS_PER_SAMPLE <- 10    # Minimum cells per sample-celltype combo to keep
-MIN_GENES_DETECTED <- 10      # Minimum genes detected per cell
-FDR_THRESHOLD <- 0.1         # Significance threshold
-LFC_THRESHOLD <- 0.25          # Log2 fold-change threshold for labeling
-
-# Gene-level filtering (applied per cell type before DESeq2)
-MIN_GENE_EXPR_FRAC <- 0.05   # Gene must be expressed in at least this fraction of cells (per cell type)
-MIN_COUNTS_PER_SAMPLE <- 5   # Minimum counts a gene must have in a sample to be "detected"
-MIN_SAMPLES_EXPRESSED <- 3    # Gene must be detected in at least this many samples
-
-# Reference level for DESeq2 (DKO vs WT means WT is reference)
-REFERENCE_CONDITION <- "WT"
-TEST_CONDITION <- "DKO"
-
 # =============================================================================
 # 1. Load Seurat object
 # =============================================================================
-seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_Tier1_seurat.rds"))
+seu <- readRDS(SEURAT_RDS)
 cat("Loaded Seurat object:", ncol(seu), "cells,", nrow(seu), "genes\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$condition <- factor(seu$condition,
@@ -290,7 +277,7 @@ pb_meta <- data.frame(
   n_cells = as.numeric(group_counts[names(pb_list)]),
   stringsAsFactors = FALSE
 )
-pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), "WT", "DKO")
+pb_meta$condition <- ifelse(pb_meta$sample %in% WT_SAMPLES, REFERENCE_CONDITION, TEST_CONDITION)
 rownames(pb_meta) <- pb_meta$group
 
 cat(sprintf("Pseudobulk matrix: %d genes x %d samples (after min %d cells filter)\n",
@@ -316,6 +303,10 @@ cat(sprintf("Pseudobulk profiles saved to: %s\n", pb_dir))
 cell_types <- unique(pb_meta$celltype)
 cat(sprintf("\nRunning DESeq2 for %d cell types...\n", length(cell_types)))
 
+# Significance labels (derived from parameters)
+label_up <- paste("Up in", TEST_CONDITION)
+label_down <- paste("Down in", TEST_CONDITION)
+
 all_results <- list()
 summary_stats <- data.frame()
 
@@ -328,9 +319,9 @@ for (ct in cell_types) {
   ct_counts <- pb_mat[, ct_samples, drop = FALSE]
 
   # Check we have replicates in both conditions
-  n_wt <- sum(ct_meta$condition == "WT")
-  n_dko <- sum(ct_meta$condition == "DKO")
-  cat(sprintf("  Samples: %d WT, %d DKO\n", n_wt, n_dko))
+  n_wt <- sum(ct_meta$condition == REFERENCE_CONDITION)
+  n_dko <- sum(ct_meta$condition == TEST_CONDITION)
+  cat(sprintf("  Samples: %d %s, %d %s\n", n_wt, REFERENCE_CONDITION, n_dko, TEST_CONDITION))
 
 
   if (n_wt < 2 || n_dko < 2) {
@@ -385,15 +376,15 @@ for (ct in cell_types) {
   # Classify significance
   res_df$significance <- "NS"
   res_df$significance[!is.na(res_df$padj) & res_df$padj < FDR_THRESHOLD &
-                      res_df$log2FoldChange > LFC_THRESHOLD] <- "Up in DKO"
+                      res_df$log2FoldChange > LFC_THRESHOLD] <- label_up
   res_df$significance[!is.na(res_df$padj) & res_df$padj < FDR_THRESHOLD &
-                      res_df$log2FoldChange < -LFC_THRESHOLD] <- "Down in DKO"
+                      res_df$log2FoldChange < -LFC_THRESHOLD] <- label_down
 
   all_results[[ct]] <- res_df
 
   # Summary
-  n_up <- sum(res_df$significance == "Up in DKO")
-  n_down <- sum(res_df$significance == "Down in DKO")
+  n_up <- sum(res_df$significance == label_up)
+  n_down <- sum(res_df$significance == label_down)
   n_tested <- sum(!is.na(res_df$padj))
   cat(sprintf("  DEGs (FDR < %.2f, |LFC| > %.1f): %d up, %d down (of %d tested)\n",
               FDR_THRESHOLD, LFC_THRESHOLD, n_up, n_down, n_tested))
@@ -448,13 +439,12 @@ for (ct in names(all_results)) {
   top_genes <- res_df %>%
     filter(significance != "NS") %>%
     arrange(padj) %>%
-    head(20)
+    head(VOLCANO_TOP_N)
 
   p <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = significance)) +
     geom_point(alpha = 0.5, size = 0.8) +
-    scale_color_manual(values = c("Up in DKO" = "#D73027",
-                                  "Down in DKO" = "#4575B4",
-                                  "NS" = "grey60")) +
+    scale_color_manual(values = setNames(c("#D73027", "#4575B4", "grey60"),
+                                         c(label_up, label_down, "NS"))) +
     geom_vline(xintercept = c(-LFC_THRESHOLD, LFC_THRESHOLD),
                linetype = "dashed", color = "grey40") +
     geom_hline(yintercept = -log10(FDR_THRESHOLD),
@@ -463,8 +453,8 @@ for (ct in names(all_results)) {
                     aes(label = gene),
                     size = 2.5, max.overlaps = 15,
                     color = "black") +
-    labs(title = paste("DKO vs WT —", ct),
-         x = "Log2 Fold Change (DKO / WT)",
+    labs(title = paste(TEST_CONDITION, "vs", REFERENCE_CONDITION, "—", ct),
+         x = paste0("Log2 Fold Change (", TEST_CONDITION, " / ", REFERENCE_CONDITION, ")"),
          y = "-log10(adjusted p-value)",
          color = NULL) +
     theme_publication() +
@@ -483,13 +473,13 @@ if (nrow(summary_stats) > 0) {
     select(celltype, n_up_DKO, n_down_DKO) %>%
     pivot_longer(cols = c(n_up_DKO, n_down_DKO),
                  names_to = "direction", values_to = "n_DEGs") %>%
-    mutate(direction = ifelse(direction == "n_up_DKO", "Up in DKO", "Down in DKO"),
-           n_DEGs_signed = ifelse(direction == "Up in DKO", n_DEGs, -n_DEGs))
+    mutate(direction = ifelse(direction == "n_up_DKO", label_up, label_down),
+           n_DEGs_signed = ifelse(direction == label_up, n_DEGs, -n_DEGs))
 
   p_bar <- ggplot(deg_long, aes(x = reorder(celltype, -abs(n_DEGs_signed)),
                                 y = n_DEGs_signed, fill = direction)) +
     geom_bar(stat = "identity") +
-    scale_fill_manual(values = c("Up in DKO" = "#D73027", "Down in DKO" = "#4575B4")) +
+    scale_fill_manual(values = setNames(c("#D73027", "#4575B4"), c(label_up, label_down))) +
     geom_hline(yintercept = 0, color = "black") +
     coord_flip() +
     labs(title = sprintf("DEGs per cell type (FDR < %.2f, |LFC| > %.1f)",
@@ -544,7 +534,7 @@ if (length(sig_genes) > 0) {
              breaks = seq(-cap_val, cap_val, length.out = 101),
              cluster_rows = TRUE,
              cluster_cols = FALSE,
-             main = "Significant DEGs — signed -log10(p-value) (DKO vs WT)",
+             main = paste("Significant DEGs — signed -log10(p-value)", paste0("(", TEST_CONDITION, " vs ", REFERENCE_CONDITION, ")")),
              fontsize_row = 10,
              fontsize_col = 10,
             treeheight_row = 0)
@@ -567,13 +557,12 @@ for (ct in names(all_results)) {
 
   p_ma <- ggplot(res_df, aes(x = log10(baseMean + 1), y = log2FoldChange, color = significance)) +
     geom_point(alpha = 0.5, size = 0.8) +
-    scale_color_manual(values = c("Up in DKO" = "#D73027",
-                                  "Down in DKO" = "#4575B4",
-                                  "NS" = "grey60")) +
+    scale_color_manual(values = setNames(c("#D73027", "#4575B4", "grey60"),
+                                         c(label_up, label_down, "NS"))) +
     geom_hline(yintercept = 0, linetype = "solid", color = "black") +
     geom_hline(yintercept = c(-LFC_THRESHOLD, LFC_THRESHOLD),
                linetype = "dashed", color = "grey40") +
-    labs(title = paste("MA plot — DKO vs WT —", ct),
+    labs(title = paste("MA plot —", TEST_CONDITION, "vs", REFERENCE_CONDITION, "—", ct),
          x = "log10(Mean Expression + 1)",
          y = "Log2 Fold Change",
          color = NULL) +

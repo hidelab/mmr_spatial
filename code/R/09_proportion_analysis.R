@@ -10,32 +10,16 @@ library(patchwork)
 # =============================================================================
 # Parameters
 # =============================================================================
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "09_proportion_analysis")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-DOMAIN_COL <- "banksy_domain_merged"
-DOMAIN_NAMES <- c(
-  "1" = "Mammary Glands",
-  "2" = "Tumor Core",
-  "3" = "Immune Engulfing",
-  "4" = "Stroma"
-)
-
-# Domain colors (matching 02_03)
-DOMAIN_COLORS_NAMED <- c(
-  "Mammary Glands"    = "#F9A825",
-  "Tumor Core"        = "#B71C1C",
-  "Immune Engulfing"  = "#4A148C",
-  "Stroma"            = "#BDBDBD"
-)
-
-# Cell-level QC filters
-MIN_TOTAL_COUNTS <- 50
-MIN_GENES_DETECTED <- 10
+DOMAIN_COL <- COL_DOMAIN
 
 # =============================================================================
 # 1. Load metadata and filter low-quality cells
@@ -45,7 +29,7 @@ meta <- readRDS(file.path(PROJECT_DIR, "output", "R", "02_banksy_lambda08",
 cat("Loaded metadata:", nrow(meta), "cells\n")
 
 # Recode condition
-meta$condition <- gsub("^KO$", "DKO", meta$condition)
+meta$condition <- gsub("^KO$", TEST_CONDITION, meta$condition)
 
 # Filter low-quality cells
 n_before <- nrow(meta)
@@ -60,8 +44,7 @@ cat(sprintf("  Filters: total_counts >= %d, n_genes_by_counts >= %d\n",
 
 # Assign domain names
 meta$domain_name <- DOMAIN_NAMES[as.character(meta[[DOMAIN_COL]])]
-meta$domain_name <- factor(meta$domain_name, levels = c("Mammary Glands", "Tumor Core",
-                                                         "Immune Engulfing", "Stroma"))
+meta$domain_name <- factor(meta$domain_name, levels = DOMAIN_ORDER)
 
 cat("Conditions:", paste(unique(meta$condition), collapse = ", "), "\n")
 cat("Samples:", paste(sort(unique(meta$sample)), collapse = ", "), "\n")
@@ -82,7 +65,7 @@ prop_domain_sample <- as.data.frame(meta) %>%
 # Stacked bar: domain proportions per sample
 p1 <- ggplot(prop_domain_sample, aes(x = sample, y = prop, fill = domain_name)) +
   geom_bar(stat = "identity") +
-  scale_fill_manual(values = DOMAIN_COLORS_NAMED) +
+  scale_fill_manual(values = DOMAIN_COLORS) +
   labs(title = "Domain proportions per sample",
        x = NULL, y = "Proportion", fill = "Domain") +
   theme_publication() +
@@ -103,7 +86,7 @@ prop_domain_cond <- as.data.frame(meta) %>%
 
 p2 <- ggplot(prop_domain_cond, aes(x = condition, y = prop, fill = domain_name)) +
   geom_bar(stat = "identity", width = 0.6) +
-  scale_fill_manual(values = DOMAIN_COLORS_NAMED) +
+  scale_fill_manual(values = DOMAIN_COLORS) +
   labs(title = "Domain proportions by condition",
        x = NULL, y = "Proportion", fill = "Domain") +
   theme_publication()
@@ -222,7 +205,7 @@ counts_domain_sample <- as.data.frame(meta) %>%
 
 p6 <- ggplot(counts_domain_sample, aes(x = sample, y = n, fill = domain_name)) +
   geom_bar(stat = "identity", position = "dodge") +
-  scale_fill_manual(values = DOMAIN_COLORS_NAMED) +
+  scale_fill_manual(values = DOMAIN_COLORS) +
   labs(title = "Cell counts per domain per sample",
        x = NULL, y = "Number of cells", fill = "Domain") +
   theme_publication() +
@@ -271,20 +254,7 @@ write.csv(ratio_df, file.path(OUTPUT_DIR, "immune_engulfing_tumor_core_ratio.csv
 # =============================================================================
 cat("== Immune cell ratio: Stroma vs Immune Engulfing ==\n")
 
-IMMUNE_CELLTYPES <- #c("CD8+ T", "DC (Ccr7+)", "Treg", "pDC", "NK", "cDC1", )
-c(
-  "CD8+ T",
-  "Treg",
-  "NK",
-  "Macrophage (Cxcl16+)",
-  "Macrophage (Mrc1+)",
-  "Macrophage (Arg1+)",
-  "cDC1",
-  "pDC",
-  "DC (Ccr7+)",
-  "Neutrophil",
-  "Mast Cell"
-)
+# IMMUNE_CELLTYPES defined in 00_parameters.R
 
 
 # Count immune cells of interest per sample per domain (only domains 3 & 4)
@@ -310,8 +280,8 @@ ttest_results <- immune_ratio %>%
       t.test(log2_ratio ~ condition)$p.value,
       error = function(e) NA_real_
     ),
-    mean_WT = mean(log2_ratio[condition == "WT"], na.rm = TRUE),
-    mean_DKO = mean(log2_ratio[condition == "DKO"], na.rm = TRUE),
+    mean_WT = mean(log2_ratio[condition == REFERENCE_CONDITION], na.rm = TRUE),
+    mean_DKO = mean(log2_ratio[condition == TEST_CONDITION], na.rm = TRUE),
     .groups = "drop"
   )
 

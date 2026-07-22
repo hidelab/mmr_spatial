@@ -9,44 +9,26 @@ library(ggplot2)
 library(patchwork)
 library(pheatmap)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "02_banksy_lambda08", "merge_domains")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-# =============================================================================
-# USER PARAMETERS
-# =============================================================================
-DOMAIN_COL <- "banksy_res_0.8"
-MERGE_K <- 4
-
-# Domain color palette
-DOMAIN_COLORS <- c(
-  "1" = "#F9A825",   # Mammary Glands — yellow
-  "2" = "#B71C1C",   # Tumor Core — deep red
-  "3" = "#4A148C",   # Immune Engulfing — deep purple
-  "4" = "#BDBDBD"    # Stroma — light gray
-)
-
-# Domain names (assigned after inspecting composition)
-DOMAIN_NAMES <- c(
-  "1" = "Mammary Glands",
-  "2" = "Tumor Core",
-  "3" = "Immune Engulfing",
-  "4" = "Stroma"
-)
-
-# Display order for domains: Tumor Core, Immune Engulfing, Stroma, Mammary Glands
-DOMAIN_ORDER <- c("2", "3", "4", "1")
+# Domain source column and display order (numeric domain IDs)
+DOMAIN_COL <- DOMAIN_SOURCE_COL
+DOMAIN_ORDER_NUM <- names(DOMAIN_NAMES)[match(DOMAIN_ORDER, DOMAIN_NAMES)]
 
 # --- 1. Load Banksy-clustered Seurat object -----------------------------------
-seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds"))
+BANKSY_RDS <- file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds")
+seu <- readRDS(BANKSY_RDS)
 cat("Loaded:", ncol(seu), "cells\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$condition <- factor(seu$condition,
@@ -69,8 +51,8 @@ rownames(centroids) <- domains
 cat(sprintf("Centroids matrix: %d domains x %d dims\n", nrow(centroids), ncol(centroids)))
 
 # --- 3. Hierarchical clustering on centroids ----------------------------------
-dist_mat <- dist(centroids, method = "euclidean")
-hc <- hclust(dist_mat, method = "ward.D2")
+dist_mat <- dist(centroids, method = MERGE_DIST_METHOD)
+hc <- hclust(dist_mat, method = MERGE_LINK_METHOD)
 
 # --- 4. Plot dendrogram -------------------------------------------------------
 pdf(file.path(OUTPUT_DIR, "domain_dendrogram.pdf"), width = 10, height = 6)
@@ -144,7 +126,7 @@ ggsave(file.path(OUTPUT_DIR, "barplot_domain_condition.pdf"), p_cond, width = 6,
 # --- 8. Cell-type composition per merged domain --------------------------------
 ct_merged <- table(seu@meta.data[[merged_col]], seu$Tier1_celltype)
 ct_merged_prop <- prop.table(ct_merged, margin = 1)
-ct_merged_prop <- ct_merged_prop[DOMAIN_ORDER, ]
+ct_merged_prop <- ct_merged_prop[DOMAIN_ORDER_NUM, ]
 
 pdf(file.path(OUTPUT_DIR, "heatmap_merged_domain_celltype.pdf"), width = 8, height = 6)
 pheatmap(ct_merged_prop,
@@ -155,7 +137,7 @@ pheatmap(ct_merged_prop,
          color = colorRampPalette(c("white", "steelblue", "navy"))(100),
          main = paste("Cell-type composition per merged domain (k =", MERGE_K, ")"),
          fontsize_row = 11, fontsize_col = 9,
-         labels_row = DOMAIN_NAMES[DOMAIN_ORDER])
+         labels_row = DOMAIN_NAMES[DOMAIN_ORDER_NUM])
 dev.off()
 
 write.csv(as.data.frame.matrix(ct_merged_prop),
@@ -165,7 +147,7 @@ write.csv(as.data.frame.matrix(ct_merged_prop),
 # Shows: what % of each cell type is in each domain
 ct_merged_inv <- table(seu$Tier1_celltype, seu@meta.data[[merged_col]])
 ct_merged_inv_prop <- prop.table(ct_merged_inv, margin = 1)
-ct_merged_inv_prop <- ct_merged_inv_prop[, DOMAIN_ORDER]
+ct_merged_inv_prop <- ct_merged_inv_prop[, DOMAIN_ORDER_NUM]
 
 pdf(file.path(OUTPUT_DIR, "heatmap_celltype_distribution_across_domains.pdf"), width = 8, height = 8)
 pheatmap(ct_merged_inv_prop,
@@ -176,7 +158,7 @@ pheatmap(ct_merged_inv_prop,
          color = colorRampPalette(c("white", "steelblue", "navy"))(100),
          main = paste("Distribution of cell types across domains (k =", MERGE_K, ")"),
          fontsize_row = 11, fontsize_col = 10,
-         labels_col = DOMAIN_NAMES[DOMAIN_ORDER],
+         labels_col = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
          display_numbers = TRUE,
          number_format = "%.2f",
          number_color = "black",
@@ -194,7 +176,7 @@ temp_heatmap <- pheatmap(ct_merged_inv_prop,
 row_order <- rownames(ct_merged_inv_prop)[temp_heatmap$tree_row$order]
 
 all_celltypes <- rownames(ct_merged_inv_prop)
-all_domains <- DOMAIN_ORDER
+all_domains <- DOMAIN_ORDER_NUM
 
 for (cond in levels(seu$condition)) {
   idx_cond <- which(seu$condition == cond)
@@ -208,7 +190,7 @@ for (cond in levels(seu$condition)) {
   ct_cond_full <- matrix(0, nrow = length(all_celltypes), ncol = length(all_domains),
                          dimnames = list(all_celltypes, all_domains))
   ct_cond_full[rownames(ct_cond_inv_prop), colnames(ct_cond_inv_prop)] <- ct_cond_inv_prop
-  ct_cond_full <- ct_cond_full[row_order, DOMAIN_ORDER]
+  ct_cond_full <- ct_cond_full[row_order, DOMAIN_ORDER_NUM]
 
   pdf(file.path(OUTPUT_DIR, paste0("heatmap_celltype_distribution_", cond, ".pdf")),
       width = 8, height = 8)
@@ -218,7 +200,7 @@ for (cond in levels(seu$condition)) {
            color = colorRampPalette(c("white", "steelblue", "navy"))(100),
            main = sprintf("Cell type distribution across domains — %s (k = %d)", cond, MERGE_K),
            fontsize_row = 11, fontsize_col = 10,
-           labels_col = DOMAIN_NAMES[DOMAIN_ORDER],
+           labels_col = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
            display_numbers = TRUE,
            number_format = "%.2f",
            number_color = "black",
@@ -235,10 +217,14 @@ seu@meta.data[[merged_col]] <- factor(seu@meta.data[[merged_col]],
                                        levels = as.character(1:MERGE_K))
 sample_ids <- levels(seu$sample)
 
+# Map DOMAIN_COLORS to numeric cluster IDs (factor levels are "1","2",... not names)
+DOMAIN_COLORS_NUM <- setNames(DOMAIN_COLORS[DOMAIN_NAMES[as.character(1:MERGE_K)]],
+                              as.character(1:MERGE_K))
+
 plots_spatial <- lapply(sample_ids, function(s) {
   sub <- subset(seu, subset = sample == s)
   DimPlot(sub, reduction = "spatial", group.by = merged_col, pt.size = 1,
-          cols = DOMAIN_COLORS, shuffle = TRUE,
+          cols = DOMAIN_COLORS_NUM, shuffle = TRUE,
           raster = TRUE, raster.dpi = c(300, 300)) +
     ggtitle(s) +
     NoAxes() +
@@ -252,9 +238,12 @@ p_spatial <- wrap_plots(plots_spatial, nrow = 1) +
 ggsave(file.path(OUTPUT_DIR, "spatial_merged_domains.pdf"),
        p_spatial, width = 4 * length(sample_ids), height = 5)
 
+ggsave(file.path(OUTPUT_DIR, "spatial_merged_domains.png"),
+       p_spatial, width = 4 * length(sample_ids), height = 5)
+
 # UMAP view of merged domains vs cell type
 p_dom_umap <- DimPlot(seu, reduction = "umap_banksy", group.by = merged_col,
-                      pt.size = 1, cols = DOMAIN_COLORS, shuffle = TRUE,
+                      pt.size = 1, cols = DOMAIN_COLORS_NUM, shuffle = TRUE,
                       raster = TRUE, raster.dpi = c(300, 300)) +
   ggtitle(paste("Merged Domains (k =", MERGE_K, ")")) +
   NoAxes() +
@@ -269,6 +258,8 @@ p_ct_umap <- DimPlot(seu, reduction = "umap_banksy", group.by = "Tier1_celltype"
 
 ggsave(file.path(OUTPUT_DIR, "umap_merged_domains_vs_celltype.pdf"),
        p_dom_umap + p_ct_umap, width = 16, height = 6)
+ggsave(file.path(OUTPUT_DIR, "umap_merged_domains_vs_celltype.png"),
+       p_dom_umap + p_ct_umap, width = 16, height = 6)
 cat("Spatial and UMAP plots saved.\n")
 
 # --- 10. Assign domain names ---------------------------------------------------
@@ -282,8 +273,9 @@ for (d in names(DOMAIN_NAMES)) {
 write.csv(merge_map, file.path(OUTPUT_DIR, "domain_merge_mapping.csv"), row.names = FALSE)
 
 saveRDS(seu@meta.data, file.path(OUTPUT_DIR, "DKO_banksy_merged_metadata.rds"))
-saveRDS(seu, file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
+BANKSY_MERGED_RDS <- file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds")
+saveRDS(seu, BANKSY_MERGED_RDS)
 
-cat("\nSeurat object saved to:", file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"), "\n")
+cat("\nSeurat object saved to:", BANKSY_MERGED_RDS, "\n")
 cat("Outputs saved to:", OUTPUT_DIR, "\n")
 cat("Done.\n")

@@ -18,42 +18,28 @@ library(stringr)
 # =============================================================================
 # Parameters
 # =============================================================================
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
 BASE_OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "13_DE_pathways_immuneXdomains")
 dir.create(BASE_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Pathway gene membership
-pathways2 <- readRDS(file.path(PROJECT_DIR, "input/MSigDBPathGeneTab2024.RDS"))
-pathway_displayNames <- read.csv(file.path(PROJECT_DIR, "input/MSigDB_display_names_v2024.csv"))
+pathways2 <- readRDS(MSIGDB_PATHWAYS)
+pathway_displayNames <- read.csv(MSIGDB_NAMES)
 displayNames <- pathway_displayNames[, c("standard_name", "display_name")]
 
-# Cell types of interest (immune)
-CELLTYPES_OF_INTEREST <- c(
-    "CD8+ T",
-    "Treg",
-    "DC (Ccr7+)",
-    "pDC",
-    "NK",
-    "Macrophage (Cxcl16+)",
-    "cDC1",
-    "Neutrophil"
-)
+# Cell types of interest (immune subtypes for domain DE)
+CELLTYPES_OF_INTEREST <- IMMUNE_CELLTYPES_DE
 
-# Domain definitions
-DOMAIN_COL <- "banksy_domain_merged"
-DOMAIN_NAMES <- c(
+# Domain definitions (exclude Mammary Glands)
+DOMAIN_COL <- COL_DOMAIN
+DOMAIN_NAMES_SUB <- c(
     "2" = "Tumor_Core",
     "3" = "Immune_Engulfing",
     "4" = "Stroma"
 )
-
-# QC thresholds
-MIN_TOTAL_COUNTS <- 50
-MIN_GENES_DETECTED <- 10
-MIN_CELLS_PER_SAMPLE <- 10
-MIN_PATH_SIZE <- 10
 
 # Helper: filesystem-safe name
 safe_name <- function(ct) {
@@ -97,8 +83,8 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells,", nrow(seu), "genes\n")
 
 # Recode condition
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
-seu$condition <- factor(seu$condition, levels = c("WT", "DKO"))
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
+seu$condition <- factor(seu$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$sample <- factor(seu$sample,
@@ -131,7 +117,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
     cat(sprintf("  After QC: %d cells\n", ncol(seu_ct)))
 
     # Keep only relevant domains
-    seu_ct <- subset(seu_ct, subset = domain %in% names(DOMAIN_NAMES))
+    seu_ct <- subset(seu_ct, subset = domain %in% names(DOMAIN_NAMES_SUB))
     cat(sprintf("  After domain filter: %d cells\n", ncol(seu_ct)))
 
     if (ncol(seu_ct) < MIN_CELLS_PER_SAMPLE * 2) {
@@ -173,8 +159,8 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
         n_cells = as.numeric(group_counts[names(pb_list)]),
         stringsAsFactors = FALSE
     )
-    pb_meta$domain_name <- DOMAIN_NAMES[pb_meta$domain]
-    pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), "WT", "DKO")
+    pb_meta$domain_name <- DOMAIN_NAMES_SUB[pb_meta$domain]
+    pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), REFERENCE_CONDITION, TEST_CONDITION)
     rownames(pb_meta) <- pb_meta$group
 
     cat(sprintf("  Pseudobulk matrix: %d genes x %d samples\n", nrow(pb_mat), ncol(pb_mat)))
@@ -182,8 +168,8 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
     # =========================================================================
     # 2c. Run DE pathway analysis per domain
     # =========================================================================
-    for (dom_id in names(DOMAIN_NAMES)) {
-        dom_name <- DOMAIN_NAMES[dom_id]
+    for (dom_id in names(DOMAIN_NAMES_SUB)) {
+        dom_name <- DOMAIN_NAMES_SUB[dom_id]
         cat(sprintf("\n  --- %s / %s ---\n", CELLTYPE, dom_name))
 
         # Subset to this domain
@@ -191,8 +177,8 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
         dom_meta <- pb_meta[dom_samples, ]
 
         # Check we have both conditions
-        n_wt <- sum(dom_meta$condition == "WT")
-        n_dko <- sum(dom_meta$condition == "DKO")
+        n_wt <- sum(dom_meta$condition == REFERENCE_CONDITION)
+        n_dko <- sum(dom_meta$condition == TEST_CONDITION)
         if (n_wt < 2 || n_dko < 2) {
             cat(sprintf("  SKIPPED: not enough replicates (WT=%d, DKO=%d)\n", n_wt, n_dko))
             next
@@ -229,7 +215,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
             condition = dom_meta[colnames(dom_counts_ensembl), "condition"],
             row.names = colnames(dom_counts_ensembl)
         )
-        covariates$condition <- factor(covariates$condition, levels = c("WT", "DKO"))
+        covariates$condition <- factor(covariates$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
 
         # Output directory for this cell type x domain
         dep_dir <- file.path(OUTPUT_DIR, dom_name)
@@ -245,7 +231,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
                 outDir = dep_dir,
                 saveOutName = paste0(ct_safe, "_", dom_name, "_DEP_DKO_vs_WT.RDS"),
                 minPathSize = MIN_PATH_SIZE,
-                contrastConds = "conditionDKO-conditionWT"
+                contrastConds = paste0("condition", TEST_CONDITION, "-condition", REFERENCE_CONDITION)
             )
 
             # Save results
@@ -261,15 +247,15 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
             saveRDS(de.paths$PathwayResiduals,
                     file.path(dep_dir, paste0(ct_safe, "_", dom_name, "_Residuals.RDS")))
 
-            n_sig <- sum(temp$adj.P.Val < 0.1, na.rm = TRUE)
-            cat(sprintf("  Significant pathways (adj.P < 0.1): %d\n", n_sig))
+            n_sig <- sum(temp$adj.P.Val < FDR_THRESHOLD, na.rm = TRUE)
+            cat(sprintf("  Significant pathways (adj.P < %.2f): %d\n", FDR_THRESHOLD, n_sig))
 
             # =================================================================
             # Bar plot of top significant pathways
             # =================================================================
-            sig_paths <- temp[temp$adj.P.Val < 0.1, ]
+            sig_paths <- temp[temp$adj.P.Val < FDR_THRESHOLD, ]
             if (nrow(sig_paths) > 0) {
-                sig_paths <- head(sig_paths, 30)
+                sig_paths <- head(sig_paths, TOP_PATHWAYS_PLOT)
 
                 sig_paths$label <- ifelse(
                     is.na(sig_paths$display_name) | sig_paths$display_name == "",
@@ -278,9 +264,9 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
                 )
 
                 # Truncate long names
-                if (any(str_length(sig_paths$label) > 70)) {
-                    long_inds <- str_length(sig_paths$label) > 70
-                    sig_paths[long_inds, ]$label <- str_sub(sig_paths[long_inds, ]$label, 1, 70)
+                if (any(str_length(sig_paths$label) > PATHWAY_NAME_TRUNC)) {
+                    long_inds <- str_length(sig_paths$label) > PATHWAY_NAME_TRUNC
+                    sig_paths[long_inds, ]$label <- str_sub(sig_paths[long_inds, ]$label, 1, PATHWAY_NAME_TRUNC)
                     sig_paths[long_inds, ]$label <- paste0(sig_paths[long_inds, ]$label, "*")
                 }
 
@@ -358,8 +344,8 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
 
                     safe_filename <- substr(gsub("[^A-Za-z0-9_]", "_", pathway_name), 1, 80)
                     plot_title <- as.character(pathway_label)
-                    if (nchar(plot_title) > 70) {
-                        plot_title <- paste0(substr(plot_title, 1, 70), "*")
+                    if (nchar(plot_title) > PATHWAY_NAME_TRUNC) {
+                        plot_title <- paste0(substr(plot_title, 1, PATHWAY_NAME_TRUNC), "*")
                     }
 
                     pheatmap(

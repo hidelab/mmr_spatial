@@ -8,32 +8,17 @@ library(ggplot2)
 library(patchwork)
 library(viridis)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "08_spatial_features_masked", "all_cells")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-# =============================================================================
-# Selected genes of interest
-# =============================================================================
-GENES <- c(
-  # Cytotoxicity
-  "Klrk1", "Gzmb", "Prf1",
-  # Chemokine axis
-  "Cxcl16", "Cxcr6",
-  # Cytokine signaling
-  "Il15",
-  # Immune markers
-  "Cd8a", "Cd4", "Foxp3", "Nkg7",
-  # Macrophage polarization
-  "Mrc1", "Cd163", "Nos2",
-  # Tumor / proliferation
-  "Mki67", "Top2a", "Tigit", "Arg1",
-  # Some DEG genes
-  "Osm", "Osmr", "Il24"
-)
+# Genes of interest (combined list from 00_parameters.R)
+GENES <- GENES_SPATIAL_VIS
 
 # =============================================================================
 # Load Seurat object
@@ -42,7 +27,7 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$sample <- factor(seu$sample,
                      levels = intersect(names(SAMPLE_COLORS), unique(seu$sample)))
 

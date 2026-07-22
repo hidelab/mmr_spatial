@@ -7,7 +7,9 @@ library(ggplot2)
 library(patchwork)
 library(cowplot)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "01_summary_exploratory")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -15,8 +17,7 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
 # --- 1. Load h5ad via anndataR -------------------------------------------------
-h5ad_path <- file.path(PROJECT_DIR, "input", "DKO_results", "DKO_Tier1.h5ad")
-adata <- read_h5ad(h5ad_path)
+adata <- read_h5ad(H5AD_INPUT)
 
 # --- 2. Convert to Seurat ------------------------------------------------------
 sobj <- adata$as_Seurat()
@@ -42,7 +43,7 @@ if ("X_umap" %in% names(adata$obsm)) {
 }
 
 # Recode condition: "KO" → "DKO" for display consistency
-sobj$condition <- gsub("^KO$", "DKO", sobj$condition)
+sobj$condition <- gsub("^KO$", TEST_CONDITION, sobj$condition)
 
 # Set factor levels for consistent legend ordering across all plots
 # Only include levels that actually exist in the data to avoid NAs
@@ -182,7 +183,7 @@ write.csv(celltype_counts, file.path(OUTPUT_DIR, "table_cells_per_celltype.csv")
 sample_counts <- as.data.frame.matrix(table(sobj$sample, sobj$Tier1_celltype))
 sample_counts$Total <- rowSums(sample_counts)
 sample_counts$Sample <- rownames(sample_counts)
-sample_counts$Condition <- ifelse(grepl("^WT", sample_counts$Sample), "WT", "DKO")
+sample_counts$Condition <- ifelse(sample_counts$Sample %in% WT_SAMPLES, REFERENCE_CONDITION, TEST_CONDITION)
 sample_counts <- sample_counts[, c("Sample", "Condition", levels(sobj$Tier1_celltype), "Total")]
 write.csv(sample_counts, file.path(OUTPUT_DIR, "table_cells_per_sample.csv"), row.names = FALSE)
 
@@ -203,6 +204,6 @@ cat("  - table_cells_per_sample.csv\n")
 cat("  - table_qc_per_sample.csv\n")
 
 # --- 6. Save Seurat object ------------------------------------------------------
-saveRDS(sobj, file.path(PROJECT_DIR, "output", "R", "DKO_Tier1_seurat.rds"))
-cat("\nSeurat object saved to:", file.path(PROJECT_DIR, "output", "R", "DKO_Tier1_seurat.rds"), "\n")
+saveRDS(sobj, SEURAT_RDS)
+cat("\nSeurat object saved to:", SEURAT_RDS, "\n")
 cat("Plots/tables saved to:", OUTPUT_DIR, "\n")

@@ -7,36 +7,27 @@ library(Seurat)
 library(ggplot2)
 library(patchwork)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "07_domain_plots")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-DOMAIN_COL <- "banksy_domain_merged"
+DOMAIN_COL <- COL_DOMAIN
 
-# Domain colors (matching 02_03_merge_domains)
-DOMAIN_COLORS <- c(
-  "1" = "#F9A825",   # Mammary Glands — yellow
-  "2" = "#B71C1C",   # Tumor Core — deep red
-  "3" = "#4A148C",   # Immune Engulfing — deep purple
-  "4" = "#BDBDBD"    # Stroma — light gray
-)
-
-DOMAIN_NAMES <- c(
-  "1" = "Mammary Glands",
-  "2" = "Tumor Core",
-  "3" = "Immune Engulfing",
-  "4" = "Stroma"
-)
+# Map DOMAIN_COLORS (keyed by name) to numeric IDs for DimPlot
+DOMAIN_COLORS_NUM <- setNames(DOMAIN_COLORS[DOMAIN_NAMES[as.character(1:MERGE_K)]],
+                              as.character(1:MERGE_K))
 
 # --- Load merged-domain Seurat object ---
 seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$sample <- factor(seu$sample,
                      levels = intersect(names(SAMPLE_COLORS), unique(seu$sample)))
 
@@ -48,7 +39,7 @@ cat(sprintf("Plotting %d merged domains across %d samples\n", length(domains), l
 # --- Individual domain highlight plots ---
 for (dom in domains) {
   dom_name <- DOMAIN_NAMES[dom]
-  dom_color <- DOMAIN_COLORS[dom]
+  dom_color <- DOMAIN_COLORS_NUM[dom]
   cat(sprintf("  Domain %s (%s) ...\n", dom, dom_name))
 
   plots <- lapply(sample_ids, function(s) {
@@ -76,12 +67,12 @@ for (dom in domains) {
 
 # --- Combined: all domains colored together ---
 seu@meta.data[[DOMAIN_COL]] <- factor(seu@meta.data[[DOMAIN_COL]],
-                                       levels = names(DOMAIN_COLORS))
+                                       levels = names(DOMAIN_COLORS_NUM))
 
 plots_all <- lapply(sample_ids, function(s) {
   sub <- subset(seu, subset = sample == s)
   DimPlot(sub, reduction = "spatial", group.by = DOMAIN_COL, pt.size = 1,
-          cols = DOMAIN_COLORS, shuffle = TRUE,
+          cols = DOMAIN_COLORS_NUM, shuffle = TRUE,
           raster = TRUE, raster.dpi = c(300, 300)) +
     ggtitle(s) +
     NoAxes() +

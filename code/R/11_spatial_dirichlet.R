@@ -10,7 +10,9 @@ library(tidyr)
 library(tibble)
 library(DirichletReg)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "11_spatial_dirichlet")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -18,27 +20,11 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
 # =============================================================================
-# Parameters
+# Parameters (from 00_parameters.R)
 # =============================================================================
 
 # Immune cell types to include in composition analysis
-CELLTYPES_OF_INTEREST <- c(
-  "CD8+ T",
-  "Treg",
-  "NK",
-  "Macrophage (Cxcl16+)",
-  "Macrophage (Mrc1+)",
-  "Macrophage (Arg1+)",
-  "cDC1",
-  "pDC",
-  "DC (Ccr7+)",
-  "Neutrophil",
-  "Mast Cell"
-)
-
-# Cell-level QC
-MIN_TOTAL_COUNTS <- 50
-MIN_GENES_DETECTED <- 10
+CELLTYPES_OF_INTEREST <- IMMUNE_CELLTYPES
 
 # =============================================================================
 # 1. Load Seurat object
@@ -47,8 +33,8 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
-seu$condition <- factor(seu$condition, levels = c("WT", "DKO"))
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
+seu$condition <- factor(seu$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
 seu$sample <- factor(seu$sample,
                      levels = intersect(names(SAMPLE_COLORS), unique(seu$sample)))
 
@@ -103,7 +89,7 @@ cat("=== Dirichlet regression: DKO vs WT (immune cell composition) ===\n")
 cat("================================================================\n")
 
 dr_data <- as.data.frame(prop_df)
-dr_data$condition <- factor(dr_data$condition, levels = c("WT", "DKO"))
+dr_data$condition <- factor(dr_data$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
 
 AL <- DR_data(dr_data[, ct_cols])
 
@@ -129,7 +115,7 @@ results_df <- data.frame(
 )
 results_df$p.adj <- p.adjust(results_df$pval, method = "fdr")
 results_df$direction <- ifelse(results_df$estimate > 0, "Up in DKO", "Up in WT")
-results_df$significant <- results_df$p.adj < 0.1
+results_df$significant <- results_df$p.adj < FDR_THRESHOLD
 results_df <- results_df[order(results_df$pval), ]
 
 cat("\nResults (positive estimate = higher proportion in DKO):\n")
@@ -281,19 +267,12 @@ cat("\n\n================================================================\n")
 cat("=== Dirichlet regression: DKO vs WT (Epithelial & Fibroblasts) ===\n")
 cat("================================================================\n")
 
-EPI_FIB_CELLTYPES <- c(
-  "Tumor",
-  "Basal/Luminal",
-  "Fibroblast",
-  "Myofibroblast",
-  "Endothelial Cell",
-  "Adipocyte"
-)
+EPI_FIB_CELLTYPES <- EPITHELIAL_STROMAL_CELLTYPES
 
 # Reload full object for non-immune cell types
 seu_ef <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
-seu_ef$condition <- gsub("^KO$", "DKO", seu_ef$condition)
-seu_ef$condition <- factor(seu_ef$condition, levels = c("WT", "DKO"))
+seu_ef$condition <- gsub("^KO$", TEST_CONDITION, seu_ef$condition)
+seu_ef$condition <- factor(seu_ef$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
 seu_ef$sample <- factor(seu_ef$sample,
                         levels = intersect(names(SAMPLE_COLORS), unique(seu_ef$sample)))
 
@@ -333,7 +312,7 @@ for (ct in ct_cols_ef) {
 
 # Dirichlet regression
 dr_data_ef <- as.data.frame(prop_df_ef)
-dr_data_ef$condition <- factor(dr_data_ef$condition, levels = c("WT", "DKO"))
+dr_data_ef$condition <- factor(dr_data_ef$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
 AL_ef <- DR_data(dr_data_ef[, ct_cols_ef])
 
 fit_ef <- DirichReg(AL_ef ~ condition, data = dr_data_ef)
@@ -358,7 +337,7 @@ results_df_ef <- data.frame(
 )
 results_df_ef$p.adj <- p.adjust(results_df_ef$pval, method = "fdr")
 results_df_ef$direction <- ifelse(results_df_ef$estimate > 0, "Up in DKO", "Up in WT")
-results_df_ef$significant <- results_df_ef$p.adj < 0.1
+results_df_ef$significant <- results_df_ef$p.adj < FDR_THRESHOLD
 results_df_ef <- results_df_ef[order(results_df_ef$pval), ]
 
 cat("\nResults (epithelial & fibroblasts):\n")
@@ -485,12 +464,13 @@ cat("Dirichlet regression (DKO vs WT) complete!\n")
 cat("========================================\n")
 cat(sprintf("Output directory: %s\n", OUTPUT_DIR))
 cat(sprintf("\n--- Immune only ---\n"))
-cat(sprintf("Samples: %d WT, %d DKO\n",
-            sum(count_df$condition == "WT"), sum(count_df$condition == "DKO")))
-cat(sprintf("Significant cell types (FDR < 0.1): %d / %d\n",
+cat(sprintf("Samples: %d %s, %d %s\n",
+            sum(count_df$condition == REFERENCE_CONDITION), REFERENCE_CONDITION,
+            sum(count_df$condition == TEST_CONDITION), TEST_CONDITION))
+cat(sprintf("Significant cell types (FDR < %.2f): %d / %d\n", FDR_THRESHOLD,
             sum(results_df$significant), nrow(results_df)))
 cat(sprintf("\n--- Epithelial & Fibroblasts ---\n"))
-cat(sprintf("Significant cell types (FDR < 0.1): %d / %d\n",
+cat(sprintf("Significant cell types (FDR < %.2f): %d / %d\n", FDR_THRESHOLD,
             sum(results_df_ef$significant), nrow(results_df_ef)))
 cat("\nFiles generated:\n")
 cat("  Immune:\n")

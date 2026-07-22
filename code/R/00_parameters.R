@@ -11,7 +11,7 @@
 # ------------------------------------------------------------------------------
 # 1. PROJECT PATHS
 # ------------------------------------------------------------------------------
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+PROJECT_DIR <- "." # assuming that the scripts are executed from the project root.
 # Used in: ALL scripts (01–13)
 
 # Key input files
@@ -23,8 +23,8 @@ SEURAT_RDS <- file.path(PROJECT_DIR, "output", "R", "DKO_Tier1_seurat.rds")
 # Used in: 02_01 (loaded), 03, 04, 05, 06 (loaded)
 
 # Pathway databases
-MSIGDB_PATHWAYS <- file.path(PROJECT_DIR, "input", "DKO_results", "MSigDBPathGeneTab2024.RDS")
-MSIGDB_NAMES    <- file.path(PROJECT_DIR, "input", "DKO_results", "MSigDB_display_names_v2024.csv")
+MSIGDB_PATHWAYS <- file.path(PROJECT_DIR, "input", "MSigDBPathGeneTab2024.RDS")
+MSIGDB_NAMES    <- file.path(PROJECT_DIR, "input", "MSigDB_display_names_v2024.csv")
 # Used in: 12_pathway_activity.R, 13_DE_pathways_immuneXdomains.R
 
 # ------------------------------------------------------------------------------
@@ -124,7 +124,7 @@ DOMAIN_COLORS <- c(
   "Mammary Glands"   = "#F9A825",
   "Tumor Core"       = "#B71C1C",
   "Immune Engulfing" = "#4A148C",
-  "Stroma"           = "#BDBDBD"
+  "Stroma"           = "#4b5c09" #"#BDBDBD"
 )
 # Used in: 02_03, 07_01, 07_02, 08_04, 09, 10
 

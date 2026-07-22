@@ -8,7 +8,9 @@ library(patchwork)
 library(viridis)
 library(dplyr)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "10_minor_diagnostics")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -22,7 +24,7 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$condition <- factor(seu$condition,
                         levels = intersect(names(CONDITION_COLORS), unique(seu$condition)))
 seu$sample <- factor(seu$sample,
@@ -194,22 +196,8 @@ cat("\n\n##############################################################\n")
 cat("# 6. Klrk1 expression in DC populations\n")
 cat("##############################################################\n\n")
 
-DC_TYPES <- c("cDC1", "pDC", "DC (Ccr7+)")
-
-# Domain definitions (matching 09_proportion_analysis.R)
-DOMAIN_COL <- "banksy_domain_merged"
-DOMAIN_NAMES <- c(
-  "1" = "Mammary Glands",
-  "2" = "Tumor Core",
-  "3" = "Immune Engulfing",
-  "4" = "Stroma"
-)
-DOMAIN_COLORS_NAMED <- c(
-  "Mammary Glands"    = "#F9A825",
-  "Tumor Core"        = "#B71C1C",
-  "Immune Engulfing"  = "#4A148C",
-  "Stroma"            = "#BDBDBD"
-)
+# DC_TYPES, DOMAIN_NAMES, DOMAIN_COLORS defined in 00_parameters.R
+DOMAIN_COL <- COL_DOMAIN
 
 # Subset to DCs
 dc_cells <- colnames(seu)[seu$Tier1_celltype %in% DC_TYPES]
@@ -250,7 +238,7 @@ for (dc_type in c("All DCs", DC_TYPES)) {
   } else {
     cells_i <- colnames(seu)[seu$Tier1_celltype == dc_type]
   }
-  for (cond in c("WT", "DKO")) {
+  for (cond in c(REFERENCE_CONDITION, TEST_CONDITION)) {
     cells_cond <- cells_i[seu$condition[cells_i] == cond]
     n_pos <- sum(klrk1_expr[cells_cond] > 0)
     cat(sprintf("  %s | %s: %d / %d (%.2f%%)\n",
@@ -343,9 +331,7 @@ cat("\n--- Klrk1+ DC proportion across spatial domains ---\n")
 
 # Assign domain names to DC subset
 seu_dc$domain_name <- DOMAIN_NAMES[as.character(seu_dc[[DOMAIN_COL]][, 1])]
-seu_dc$domain_name <- factor(seu_dc$domain_name,
-                             levels = c("Mammary Glands", "Tumor Core",
-                                        "Immune Engulfing", "Stroma"))
+seu_dc$domain_name <- factor(seu_dc$domain_name, levels = DOMAIN_ORDER)
 
 # 8a. Proportion of Klrk1+ among ALL DCs per domain (split by condition)
 dc_domain_df <- data.frame(

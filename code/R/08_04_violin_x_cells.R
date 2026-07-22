@@ -7,7 +7,9 @@ library(ggplot2)
 library(patchwork)
 library(dplyr)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "08_violin_x_cells")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -15,59 +17,23 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
 # =============================================================================
-# Parameters
-# Leave MASK_DOMAIN empty (c()) or NULL to use all domains
+# Parameters (from 00_parameters.R)
 # =============================================================================
-DOMAIN_COL <- "banksy_domain_merged"
-DOMAIN_NAMES <- c(
-  "2" = "Tumor_Core",
-  "3" = "Immune_Engulfing",
-  "4" = "Stroma"
-)
+DOMAIN_COL <- COL_DOMAIN
 
-# Domains to include (use domain IDs). NULL or c() = all domains.
-MASK_DOMAIN <- c("2", "4")
+# Domains to include (use domain IDs)
+MASK_DOMAIN <- MASK_DOMAINS_VIOLIN_X
 
-# Cell types to include. NULL or c() = all cell types.
-MASK_CELLTYPE <- c(
-  "CD8+ T",
-  "Treg",
-  "NK",
-  "cDC1",
-  "pDC",
-  "DC (Ccr7+)",
-  "Macrophage (Cxcl16+)",
-  "Neutrophil"
-)
+# Cell types to include
+MASK_CELLTYPE <- IMMUNE_CELLTYPES_DE
 
-# Cell-level QC filters (for pseudobulk)
-MIN_TOTAL_COUNTS <- 50
-MIN_GENES_DETECTED <- 10
-MIN_CELLS_PER_SAMPLE <- 10
-
-# =============================================================================
-# Selected genes of interest
-# =============================================================================
+# Genes of interest (combined spatial list + script-specific DEG genes)
 GENES <- c(
-  # Cytotoxicity
-  "Klrk1", "Gzmb", "Prf1",
-  # Chemokine axis
-  "Cxcl16", "Cxcr6",
-  # Cytokine signaling
-  "Il15",
-  # Immune markers
-  "Cd8a", "Cd4", "Foxp3", "Nkg7",
-  # Macrophage polarization
-  "Mrc1", "Cd163", "Nos2",
-  # Tumor / proliferation
-  "Mki67", "Top2a", "Tigit", "Arg1",
-  # Some DEG genes
-  "Osm", "Osmr", "Il24",
-  "Pdgfra", "Fcgr4", "Lig1",
+  GENES_SPATIAL_VIS,
   # DEG Neutrophil
-  "Cxcl2","Ccl3","Nlrp3","Cd274", "Il1b",
-  # DEG CD8 T 
-  "Ifng","Lag3"
+  "Cxcl2", "Ccl3", "Nlrp3", "Cd274", "Il1b",
+  # DEG CD8 T
+  "Ifng", "Lag3"
 )
 
 # =============================================================================
@@ -77,7 +43,7 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$condition <- factor(seu$condition,
                         levels = intersect(names(CONDITION_COLORS), unique(seu$condition)))
 seu$sample <- factor(seu$sample,
@@ -214,7 +180,7 @@ legend_plot <- ggplot(expr_data, aes(x = celltype, y = .data[[available_genes[1]
   theme(legend.position = "bottom")
 shared_legend <- cowplot::get_legend(legend_plot)
 
-n_cols <- 4
+n_cols <- PANEL_NCOL
 n_rows <- ceiling(length(available_genes) / n_cols)
 
 p_combined <- wrap_plots(plot_list, ncol = n_cols) +
@@ -286,7 +252,7 @@ pb_meta <- data.frame(
   n_cells = as.numeric(group_table[valid_groups]),
   stringsAsFactors = FALSE
 )
-pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), "WT", "DKO")
+pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), REFERENCE_CONDITION, TEST_CONDITION)
 pb_meta$domain <- factor(pb_meta$domain, levels = domain_levels)
 pb_meta$celltype <- factor(pb_meta$celltype, levels = ct_levels)
 
@@ -342,7 +308,7 @@ pb_plot_list <- lapply(pb_genes, function(gene) {
     )
 })
 
-n_cols <- 4
+n_cols <- PANEL_NCOL
 n_rows <- ceiling(length(pb_genes) / n_cols)
 
 p_pb_combined <- wrap_plots(pb_plot_list, ncol = n_cols) +

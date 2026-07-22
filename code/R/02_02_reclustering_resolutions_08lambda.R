@@ -6,7 +6,9 @@ library(Seurat)
 library(ggplot2)
 library(patchwork)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "02_banksy_lambda08")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -14,11 +16,12 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
 # --- 1. Load the Banksy+Harmony Seurat object -----------------------------------
-seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds"))
+BANKSY_RDS <- file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds")
+seu <- readRDS(BANKSY_RDS)
 cat("Loaded Seurat object:", ncol(seu), "cells,", nrow(seu), "genes\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$condition <- factor(seu$condition,
@@ -28,7 +31,7 @@ seu$sample <- factor(seu$sample,
 
 # --- 2. Re-run FindClusters at multiple resolutions --------------------------------
 # The SNN graph from FindNeighbors (pc30) is already stored in the object.
-resolutions <- c(0.05, 0.3, 0.5)
+resolutions <- BANKSY_RESOLUTIONS_SWEEP
 
 for (res in resolutions) {
   col_name <- paste0("banksy_res_", res)
@@ -37,15 +40,15 @@ for (res in resolutions) {
   cat(sprintf("Resolution %.2f -> %d clusters\n", res, n_clust))
 }
 
-# Keep a reference to the original res 0.8 column
-orig_col <- "banksy_clust_pc30_res.0.8"
+# Keep a reference to the original primary resolution column
+orig_col <- paste0("banksy_clust_pc", BANKSY_NPC_USE, "_res.", BANKSY_RESOLUTION)
 if (!orig_col %in% colnames(seu@meta.data)) {
-  orig_col <- grep("banksy_clust_pc30", colnames(seu@meta.data), value = TRUE)[1]
+  orig_col <- grep(paste0("banksy_clust_pc", BANKSY_NPC_USE), colnames(seu@meta.data), value = TRUE)[1]
 }
-seu$banksy_res_0.8 <- seu@meta.data[[orig_col]]
+seu[[paste0("banksy_res_", BANKSY_RESOLUTION)]] <- seu@meta.data[[orig_col]]
 
 # --- 3. Summary table of cluster counts per resolution ---------------------------
-all_res <- c(resolutions, 0.8)
+all_res <- c(resolutions, BANKSY_RESOLUTION)
 res_summary <- data.frame(
   resolution = all_res,
   n_clusters = sapply(paste0("banksy_res_", all_res), function(col) {
@@ -138,7 +141,7 @@ ggsave(file.path(OUTPUT_DIR, "barplot_resolution_sweep_by_condition.pdf"),
 cat("Condition composition plots saved.\n")
 
 # --- 8. Save updated object ------------------------------------------------------
-saveRDS(seu, file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds"))
+saveRDS(seu, BANKSY_RDS)
 cat("Updated Seurat object saved with new cluster columns.\n")
 
 # Export all cluster assignments

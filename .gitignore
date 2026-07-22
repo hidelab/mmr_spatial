@@ -21,6 +21,9 @@ output/*
 # Allow this file
 !.gitignore
 
+# Allow CHANGELOG
+!CHANGELOG.md
+
 # Ignore CLAUDE.md
 CLAUDE.md
 

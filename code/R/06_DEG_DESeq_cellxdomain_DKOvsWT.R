@@ -17,43 +17,22 @@ library(tidyr)
 # =============================================================================
 # Parameters
 # =============================================================================
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 BASE_OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "06_DEG_DKOvsWT_per_domain")
 dir.create(BASE_OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Source shared color palette
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
-# Cell-level QC filters
-MIN_TOTAL_COUNTS <- 50
-MIN_CELLS_PER_SAMPLE <- 10
-MIN_GENES_DETECTED <- 10
-FDR_THRESHOLD <- 0.1
-LFC_THRESHOLD <- 0.25
+# Cell types of interest (immune subtypes for domain DE)
+CELLTYPES_OF_INTEREST <- IMMUNE_CELLTYPES_DE
 
-# Gene-level filtering
-MIN_GENE_EXPR_FRAC <- 0.05
-MIN_COUNTS_PER_SAMPLE <- 5
-MIN_SAMPLES_EXPRESSED <- 3
+# Domain column
+DOMAIN_COL <- COL_DOMAIN
 
-# --- Cell types of interest ---
-CELLTYPES_OF_INTEREST <- c(
-  "CD8+ T",
-  "Treg",
-  "DC (Ccr7+)",
-  "pDC",
-  "NK",
-  "Macrophage (Cxcl16+)",
-  "cDC1",
-  "Neutrophil"
-)
-
-# Condition comparison
-REFERENCE_CONDITION <- "WT"
-TEST_CONDITION <- "DKO"
-
-# Domain column and names
-DOMAIN_COL <- "banksy_domain_merged"
+# Domain names for this analysis (exclude Mammary Glands)
 DOMAIN_NAMES <- c(
   "2" = "Tumor_Core",
   "3" = "Immune_Engulfing",
@@ -67,7 +46,7 @@ seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells,", nrow(seu), "genes\n")
 
 # Recode condition and set factor levels
-seu$condition <- gsub("^KO$", "DKO", seu$condition)
+seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 seu$Tier1_celltype <- factor(seu$Tier1_celltype,
                              levels = intersect(TIER1_ORDER, unique(seu$Tier1_celltype)))
 seu$condition <- factor(seu$condition,
@@ -171,7 +150,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
     stringsAsFactors = FALSE
   )
   pb_meta$domain_name <- DOMAIN_NAMES[pb_meta$domain]
-  pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), "WT", "DKO")
+  pb_meta$condition <- ifelse(grepl("^WT", pb_meta$sample), REFERENCE_CONDITION, TEST_CONDITION)
   rownames(pb_meta) <- pb_meta$group
 
   cat(sprintf("Pseudobulk matrix: %d genes x %d samples (after min %d cells filter)\n",
@@ -324,7 +303,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
     top_genes <- res_df %>%
       filter(significance != "NS") %>%
       arrange(padj) %>%
-      head(20)
+      head(VOLCANO_TOP_N)
 
     sig_colors <- setNames(
       c("#D73027", "#4575B4", "grey60"),

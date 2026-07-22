@@ -7,12 +7,14 @@ library(Seurat)
 library(ggplot2)
 library(patchwork)
 
-PROJECT_DIR <- "/data/work/Pourya/mmr_spatial"
+# Source centralized parameters (defines PROJECT_DIR and all shared constants)
+source("./code/R/00_parameters.R")
+
 OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "celltype_plots")
 dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # --- Load Seurat object ---
-seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_Tier1_seurat.rds"))
+seu <- readRDS(SEURAT_RDS)
 cat("Loaded:", ncol(seu), "cells\n")
 
 celltypes <- sort(unique(seu$Tier1_celltype))
