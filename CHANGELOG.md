@@ -5,6 +5,24 @@ Newest entries appear at the top.
 
 ---
 
+## 2026-07-23
+
+### Changed
+- `code/R/07_02_plot_subjects_merged.R`: Reworked per-subject domain panel layout for publication figures.
+  - The "All Domains" merged panel now appears as the **leftmost** plot in each subject figure (was previously rightmost).
+  - Per-domain highlight panels are now ordered by `DOMAIN_ORDER` from `00_parameters.R` (Tumor Core, Immune Engulfing, Stroma, Mammary Glands) instead of numeric domain ID.
+  - Per-domain panels keep non-domain cells in gray and highlight domain cells in their original domain color.
+  - Refactored the per-sample plotting into a reusable `build_sample_panels()` helper (also robust to `subset()` inside a function via `cells =`).
+
+### Fixed
+- `code/R/07_02_plot_subjects_merged.R`: Domain-highlight color bug — the `"Domain"` color came from a *named* element (`DOMAIN_COLORS_NUM[dom]`), which mangled the color-map key to `"Domain.<id>"` so `scale_color_manual` failed to match and domain cells rendered as grey `na.value`. Now `unname()`-ed so domain cells show their true domain color.
+- `code/R/07_02_plot_subjects_merged.R`: Point-size mismatch between the All Domains panel and per-domain panels. In raster mode Seurat's on-screen dot size depends on each panel's rendered geometry (not just `pt.size`), so the legend on the All Domains panel plus per-panel coord limits made its dots render smaller. Now every panel is legend-free, shares one `PT_SIZE` constant, and pins identical `coord_fixed(xlim, ylim)` from the sample's spatial range — guaranteeing identical dot size across panels.
+
+### Added
+- `code/R/07_02_plot_subjects_merged.R`: New stacked all-samples figure `spatial_subjects_all_stacked.pdf` — one row of panels per sample, column titles on the top row, sample name as the left row label.
+
+---
+
 ## 2026-07-21
 
 ### Changed

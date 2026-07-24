@@ -202,7 +202,7 @@ DOMAIN_COMPARISONS <- list(
 # 11. SPATIAL MASK DEFAULTS
 # ------------------------------------------------------------------------------
 # Script 08_01: mask tumor core, show all cell types
-MASK_DOMAIN_DEFAULT   <- c("2")
+MASK_DOMAIN_DEFAULT   <- c("1","2","3","4")
 MASK_CELLTYPE_DEFAULT <- c()   # empty = all
 # Used in: 08_01_spatial_masks_08lambda.R
 

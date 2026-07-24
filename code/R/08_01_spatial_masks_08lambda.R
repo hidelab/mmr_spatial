@@ -97,8 +97,9 @@ for (gene in available_genes) {
 
   plots <- lapply(sample_ids, function(s) {
     sub <- subset(seu_masked, subset = sample == s)
-    FeaturePlot(sub, features = gene, reduction = "spatial", pt.size = 3,
-                alpha = 0.3, raster = TRUE, raster.dpi = c(300, 300)) +
+    FeaturePlot(sub, features = gene, reduction = "spatial", pt.size = 1,
+                alpha = 0.3, #, raster = TRUE, raster.dpi = c(300, 300)
+                ) +
       scale_color_viridis(option = "inferno", name = gene) +
       ggtitle(s) +
       NoAxes() +

@@ -52,8 +52,9 @@ for (gene in available_genes) {
 
   plots <- lapply(sample_ids, function(s) {
     sub <- subset(seu, subset = sample == s)
-    FeaturePlot(sub, features = gene, reduction = "spatial", pt.size = 1,
-                order = TRUE, raster = TRUE, raster.dpi = c(300, 300)) +
+    FeaturePlot(sub, features = gene, reduction = "spatial", pt.size = .1, alpha = 0.3, order = TRUE
+                 # , raster = TRUE, raster.dpi = c(300, 300)
+                ) +
       scale_color_viridis(option = "magma", name = gene) +
       ggtitle(s) +
       NoAxes() +
