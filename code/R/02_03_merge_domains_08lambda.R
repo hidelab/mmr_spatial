@@ -134,7 +134,7 @@ pheatmap(ct_merged_prop,
          cluster_cols = TRUE,
          clustering_method = "ward.D2",
          scale = "none",
-         color = colorRampPalette(c("white", "steelblue", "navy"))(100),
+         color = colorRampPalette(c("#FFFFFF", "#E8F4F8", "#A8D8E8", "#4A9FBC"))(100),
          main = paste("Cell-type composition per merged domain (k =", MERGE_K, ")"),
          fontsize_row = 11, fontsize_col = 9,
          labels_row = DOMAIN_NAMES[DOMAIN_ORDER_NUM])
@@ -149,20 +149,22 @@ ct_merged_inv <- table(seu$Tier1_celltype, seu@meta.data[[merged_col]])
 ct_merged_inv_prop <- prop.table(ct_merged_inv, margin = 1)
 ct_merged_inv_prop <- ct_merged_inv_prop[, DOMAIN_ORDER_NUM]
 
-pdf(file.path(OUTPUT_DIR, "heatmap_celltype_distribution_across_domains.pdf"), width = 8, height = 8)
-pheatmap(ct_merged_inv_prop,
+pdf(file.path(OUTPUT_DIR, "heatmap_celltype_distribution_across_domains.pdf"), width = 8, height = 6)
+pheatmap(t(ct_merged_inv_prop),
          cluster_rows = TRUE,
          cluster_cols = FALSE,
          clustering_method = "ward.D2",
          scale = "none",
-         color = colorRampPalette(c("white", "steelblue", "navy"))(100),
+         color = colorRampPalette(c("#FFFFFF", "#E8F4F8", "#A8D8E8", "#4A9FBC"))(100),
          main = paste("Distribution of cell types across domains (k =", MERGE_K, ")"),
          fontsize_row = 11, fontsize_col = 10,
-         labels_col = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
+         labels_row = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
          display_numbers = TRUE,
          number_format = "%.2f",
          number_color = "black",
-         fontsize_number = 9)
+         fontsize_number = 9,
+         treeheight_row = 0, 
+         treeheight_col = 0)
 dev.off()
 
 write.csv(as.data.frame.matrix(ct_merged_inv_prop),
@@ -197,7 +199,7 @@ for (cond in levels(seu$condition)) {
   pheatmap(ct_cond_full,
            cluster_rows = FALSE, cluster_cols = FALSE,
            scale = "none",
-           color = colorRampPalette(c("white", "steelblue", "navy"))(100),
+           color = colorRampPalette(c("#FFFFFF", "#E8F4F8", "#A8D8E8", "#4A9FBC"))(100),
            main = sprintf("Cell type distribution across domains — %s (k = %d)", cond, MERGE_K),
            fontsize_row = 11, fontsize_col = 10,
            labels_col = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
