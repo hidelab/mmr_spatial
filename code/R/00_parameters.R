@@ -178,14 +178,15 @@ GENES_CYTOKINE     <- c("Il15", "Osm", "Osmr", "Il24")
 GENES_IMMUNE       <- c("Cd8a", "Cd4", "Foxp3", "Cd3d", "Ptprc")
 GENES_MACROPHAGE   <- c("Mrc1", "Cd163", "Nos2", "Arg1")
 GENES_TUMOR        <- c("Mki67", "Top2a", "Tigit")
-GENES_DEGS         <- c("Pdgfra", "Fcgr4", "Lig1")
+GENES_DEGS         <- c("Pdgfra", "Fcgr4", "Lig1","Parp14","Pold2",
+"Ccl3","Ctla4","Lag3","Tnfrsf12a","Rfc3","Tnfrsf9","Ccr5")
 # Used in: 08_01, 08_02, 08_03, 08_04 (spatial/violin plots)
 
 # Combined gene list for spatial visualization
-GENES_SPATIAL_VIS <- c(
+GENES_SPATIAL_VIS <- unique(c(
   GENES_CYTOTOXICITY, GENES_CHEMOKINE, GENES_CYTOKINE,
   GENES_IMMUNE, GENES_MACROPHAGE, GENES_TUMOR, GENES_DEGS
-)
+))
 # Used in: 08_01, 08_03 (full spatial feature maps)
 
 # ------------------------------------------------------------------------------

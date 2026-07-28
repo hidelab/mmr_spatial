@@ -40,8 +40,14 @@ counts_mat <- GetAssayData(seu, assay = "RNA", layer = "counts")
 cd4_expr <- counts_mat["Cd4", ]
 cd19_expr <- counts_mat["Cd19", ]
 
+cat("adding cd8 markers")
+cd8a_expr <- counts_mat["Cd8a", ]
+
 cd4_pos <- cd4_expr > 0
 cd19_pos <- cd19_expr > 0
+
+cd8a_pos <- cd8a_expr > 0
+
 
 cat("\n=== Cell counts ===\n")
 cat(sprintf("Cd4+ cells:  %d / %d (%.2f%%)\n", sum(cd4_pos), ncol(seu), 100 * sum(cd4_pos) / ncol(seu)))
@@ -163,20 +169,29 @@ for (gene in c("Cd3d", "Ptprc", "Cd4")) {
 # 5. Summary table
 # =============================================================================
 summary_df <- data.frame(
-  marker = c("Cd4", "Cd19", "Cd4+Cd3d+", "Cd4+Ptprc+", "Cd4+Cd3d+Ptprc+"),
+  marker = c("Cd4", "Cd19", "Cd4+Cd3d+", "Cd4+Ptprc+", 
+    "Cd4+Cd3d+Ptprc+","Cd8a","Cd8+Cd3d+", "Cd8+Ptprc+", "Cd8+Cd3d+Ptprc+"),
   n_cells = c(
     sum(cd4_pos),
     sum(cd19_pos),
     sum(cd4_pos & cd3d_expr > 0),
     sum(cd4_pos & ptprc_expr > 0),
-    sum(cd4_pos & cd3d_expr > 0 & ptprc_expr > 0)
+    sum(cd4_pos & cd3d_expr > 0 & ptprc_expr > 0),
+    sum(cd8a_pos > 0),
+    sum(cd8a_pos & cd3d_expr > 0),
+    sum(cd8a_pos & ptprc_expr > 0),
+    sum(cd8a_pos & cd3d_expr > 0 & ptprc_expr > 0)
   ),
   pct_total = round(100 * c(
     sum(cd4_pos),
     sum(cd19_pos),
     sum(cd4_pos & cd3d_expr > 0),
     sum(cd4_pos & ptprc_expr > 0),
-    sum(cd4_pos & cd3d_expr > 0 & ptprc_expr > 0)
+    sum(cd4_pos & cd3d_expr > 0 & ptprc_expr > 0),    
+    sum(cd8a_pos > 0),
+    sum(cd8a_pos & cd3d_expr > 0),
+    sum(cd8a_pos & ptprc_expr > 0),
+    sum(cd8a_pos & cd3d_expr > 0 & ptprc_expr > 0)
   ) / ncol(seu), 3)
 )
 write.csv(summary_df, file.path(OUTPUT_DIR, "marker_positive_summary.csv"), row.names = FALSE)

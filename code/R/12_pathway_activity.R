@@ -2,8 +2,7 @@ rm(list = ls())
 
 library(PanomiR)
 library(dplyr)
-library(org.Hs.eg.db)
-library(AnnotationDbi)
+library(babelgene)  # proper mouse<->human orthology mapping (offline, HCOP-based)
 
 # Source centralized parameters (defines PROJECT_DIR and all shared constants)
 source("./code/R/00_parameters.R")
@@ -21,26 +20,30 @@ pseudobulk_files <- list.files(pseudobulk_dir, pattern = "pseudobulk_domain_.*\\
 out.dir0 <- file.path(PROJECT_DIR, "output/R/12_DE_pathways/")
 if (!dir.exists(out.dir0)) dir.create(out.dir0, recursive = TRUE)
 
-# --- Helper: Convert mouse gene symbols to human ENSEMBL IDs ---
+# --- Helper: Convert mouse gene symbols to human ENSEMBL IDs via orthology ---
+# NOTE: We map by true ortholog (babelgene / HCOP consensus of 12 databases),
+# NOT by naive symbol case conversion. Uppercasing fails for the many genes
+# whose human ortholog has a different symbol (e.g. Trp53 -> TP53, H2-K1 -> HLA-A)
+# and can spuriously collide with unrelated human genes.
 convert_mouse_to_human_ensembl <- function(mouse_symbols) {
-    # Mouse genes are typically Title Case (e.g., Ackr1), human are UPPERCASE (e.g., ACKR1)
-    human_symbols <- toupper(mouse_symbols)
-
-    # Map human symbols to ENSEMBL IDs
-    mapping <- AnnotationDbi::select(
-        org.Hs.eg.db,
-        keys = human_symbols,
-        keytype = "SYMBOL",
-        columns = "ENSEMBL"
+    ortho <- babelgene::orthologs(
+        genes   = unique(mouse_symbols),
+        species = "mouse",
+        human   = FALSE  # input genes are the non-human (mouse) species
     )
 
-    # Create a named vector: mouse_symbol -> ENSEMBL
-    # Handle duplicates by keeping the first mapping
-    mapping <- mapping[!is.na(mapping$ENSEMBL), ]
-    mapping <- mapping[!duplicated(mapping$SYMBOL), ]
+    # Keep only rows with a human ENSEMBL ID
+    ortho <- ortho[!is.na(ortho$human_ensembl) & ortho$human_ensembl != "", ]
 
-    result <- setNames(mapping$ENSEMBL, mapping$SYMBOL)
-    return(result)
+    # Resolve to a 1:1 mouse-symbol <-> human-ENSEMBL mapping, preferring the
+    # ortholog with the strongest cross-database support:
+    ortho <- ortho[order(-ortho$support_n), ]
+    #  (a) one human ENSEMBL per mouse symbol
+    ortho <- ortho[!duplicated(ortho$symbol), ]
+    #  (b) one mouse symbol per human ENSEMBL (avoids duplicate row names downstream)
+    ortho <- ortho[!duplicated(ortho$human_ensembl), ]
+
+    setNames(ortho$human_ensembl, ortho$symbol)
 }
 
 # --- Loop over all domain pseudobulk profiles ---
@@ -49,6 +52,7 @@ for (pb_file in pseudobulk_files) {
     # Extract domain name from filename
     domain_name <- gsub("pseudobulk_domain_", "", basename(pb_file))
     domain_name <- gsub("\\.csv$", "", domain_name)
+    domain_name <- gsub("^[0-9]_", "", domain_name)
     cat("\n========================================\n")
     cat("Processing domain:", domain_name, "\n")
     cat("========================================\n")
@@ -59,18 +63,16 @@ for (pb_file in pseudobulk_files) {
 
     cat("Original dimensions:", nrow(genes.counts2), "genes x", ncol(genes.counts2), "samples\n")
 
-    # Convert mouse gene symbols (row names) to human ENSEMBL IDs
+    # Convert mouse gene symbols (row names) to human ENSEMBL IDs via orthology
     mouse_symbols <- rownames(genes.counts2)
     symbol_to_ensembl <- convert_mouse_to_human_ensembl(mouse_symbols)
 
-    # Filter to genes that have a valid ENSEMBL mapping
-    human_symbols_upper <- toupper(mouse_symbols)
-    has_mapping <- human_symbols_upper %in% names(symbol_to_ensembl)
+    # Filter to genes that have a valid ortholog mapping
+    has_mapping <- rownames(genes.counts2) %in% names(symbol_to_ensembl)
     genes.counts2 <- genes.counts2[has_mapping, , drop = FALSE]
 
-    # Replace row names with ENSEMBL IDs
-    new_rownames <- symbol_to_ensembl[toupper(rownames(genes.counts2))]
-    rownames(genes.counts2) <- new_rownames
+    # Replace row names with human ENSEMBL IDs
+    rownames(genes.counts2) <- symbol_to_ensembl[rownames(genes.counts2)]
 
     cat("After ENSEMBL conversion:", nrow(genes.counts2), "genes mapped\n")
 
@@ -132,6 +134,7 @@ all_dep_results <- list()
 for (pb_file in pseudobulk_files) {
     domain_name <- gsub("pseudobulk_domain_", "", basename(pb_file))
     domain_name <- gsub("\\.csv$", "", domain_name)
+    domain_name <- gsub("^[0-9]_","",domain_name)
 
     res_file <- file.path(out.dir0, paste0(domain_name, "_diffPathways.csv"))
     if (file.exists(res_file)) {
@@ -181,9 +184,9 @@ for (domain_name in names(all_dep_results)) {
         geom_bar(stat = "identity", width = 0.8) +
         coord_flip() +
         scale_fill_gradient2(low = "#1565C0", mid = "white", high = "#C62828", midpoint = 0,
-                             name = "log2FC") +
+                             name = "Effect\nsize") +
         labs(
-            title = paste0("DE Pathways \u2014 ", gsub("_", " ", domain_name)),
+            title = paste0("DE Pathways in ", gsub("_", " ", domain_name)),
             y = "Signed -log10(P-value)",
             x = NULL
         ) +
@@ -202,7 +205,7 @@ for (domain_name in names(all_dep_results)) {
             plot.title = element_text(size = 14, face = "bold")
         )
 
-    plot_height <- max(4, nrow(sig_paths) * 0.3 + 2)
+    plot_height <- max(4, nrow(sig_paths) * 0.2 + 2)
 
     ggsave(
         filename = file.path(out.dir0, paste0(domain_name, "_top_pathways_barplot.pdf")),
@@ -229,22 +232,26 @@ for (domain_name in names(all_dep_results)) {
 # ============================================================================
 library(pheatmap)
 
-# Build ENSEMBL -> mouse symbol mapping (reverse of earlier conversion)
-ensembl_to_mouse <- AnnotationDbi::select(
-    org.Hs.eg.db,
-    keys = unique(pathways2$ENSEMBL),
-    keytype = "ENSEMBL",
-    columns = "SYMBOL"
+# Build human ENSEMBL -> mouse symbol mapping via orthology (reverse direction).
+# Again, this is a true ortholog lookup rather than case conversion; note a human
+# gene may have several mouse orthologs (e.g. HLA-A -> H2-K1/H2-Q7/...), so we keep
+# all mouse orthologs and later intersect with the genes actually present in the data.
+ensembl_to_mouse <- babelgene::orthologs(
+    genes   = unique(pathways2$ENSEMBL),
+    species = "mouse",
+    human   = TRUE  # input genes are human (ENSEMBL IDs)
 )
-ensembl_to_mouse <- ensembl_to_mouse[!is.na(ensembl_to_mouse$SYMBOL), ]
-ensembl_to_mouse <- ensembl_to_mouse[!duplicated(ensembl_to_mouse$ENSEMBL), ]
-# Human SYMBOL -> mouse symbol (Title Case)
-ensembl_to_mouse$mouse_symbol <- stringr::str_to_title(ensembl_to_mouse$SYMBOL)
+ensembl_to_mouse <- ensembl_to_mouse[!is.na(ensembl_to_mouse$symbol) & ensembl_to_mouse$symbol != "", ]
+# Normalize column names used downstream: ENSEMBL (human) + mouse_symbol
+ensembl_to_mouse$ENSEMBL <- ensembl_to_mouse$human_ensembl
+ensembl_to_mouse$mouse_symbol <- ensembl_to_mouse$symbol
 
 for (pb_file in pseudobulk_files) {
 
     domain_name <- gsub("pseudobulk_domain_", "", basename(pb_file))
     domain_name <- gsub("\\.csv$", "", domain_name)
+    domain_name <- gsub("^[0-9]_","",domain_name)
+
 
     # Read original pseudobulk counts (mouse gene symbols as row names)
     raw_counts <- read.csv(pb_file, row.names = 1)
@@ -318,7 +325,7 @@ for (pb_file in pseudobulk_files) {
         pheatmap(
             mat_log,
             main = plot_title,
-            fontsize_main = 8,
+            fontsize = 6,
             scale = "row",
             cluster_rows = TRUE,
             cluster_cols = FALSE,
@@ -329,9 +336,9 @@ for (pb_file in pseudobulk_files) {
             show_rownames = TRUE,
             show_colnames = TRUE,
             fontsize_row = max(4, min(8, 120 / length(genes_in_data))),
-            fontsize_col = 10,
+            fontsize_col = 6,
             filename = file.path(heatmap_dir, paste0(safe_filename, ".png")),
-            width = 6,
+            width = 4,
             height = max(4, length(genes_in_data) * 0.2 + 2)
         )
     }

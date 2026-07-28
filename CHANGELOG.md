@@ -5,6 +5,31 @@ Newest entries appear at the top.
 
 ---
 
+## 2026-07-27
+
+### Added
+- `code/R/11_01_spatial_dirichlet.R`: Added a third Dirichlet regression analysis testing whether **spatial domain** composition (Banksy merged domains via `COL_DOMAIN`, mapped to `DOMAIN_NAMES`/`DOMAIN_ORDER`) differs between DKO and WT. Mirrors the existing immune and epithelial/fibroblast blocks: builds a sample×domain count table over all QC-passing cells, fits `DirichReg(AL ~ condition)` with an LRT vs the null, and emits results CSVs plus stacked-bar, collapsed-bar, boxplot-with-significance, and dot-plot figures (`dirichlet_DKOvsWT_domains*`, `domain_*`). Updated the header docstring and end-of-run summary accordingly.
+
+### Changed
+- `code/R/11_01_spatial_dirichlet.R`: Refactored to load the Seurat object **once** (via a single `readRDS()` call) rather than three independent times. All three analyses (immune, epithelial/fibroblast, spatial domain) now filter copies of `seu_full` (after universal QC), eliminating redundant I/O on the large ~328k-cell object. Reorganized sections and updated comments to reflect the new structure.
+
+### Changed
+- `code/R/12_pathway_activity.R`: Replaced the naive mouse→human gene mapping (which simply uppercased mouse symbols) with a proper orthology-based conversion using the `babelgene` package (offline HCOP consensus of 12 databases). This fixes both the forward mapping (mouse symbol → human ENSEMBL for PanomiR input) and the reverse mapping (human ENSEMBL → mouse symbol for heatmaps). Uppercasing silently missed real orthologs whose human symbol differs (e.g. `Trp53`→`TP53`, `H2-K1`→`HLA-A`) and risked spurious collisions with unrelated human genes. Forward mapping now resolves to 1:1 (strongest support) to avoid duplicate ENSEMBL row names; dropped the now-unused `org.Hs.eg.db`/`AnnotationDbi` imports.
+
+---
+
+## 2026-07-24
+
+### Added
+- `code/R/05_02_DEG_DESeq_cellxdomains.R`: New script containing all plotting code (volcano, MA, heatmap, summary bar) extracted from `05_DEG_DESeq_cellxdomains.R`. Loops over cell types and reads per-celltype CSV results to produce visualizations independently of the DEG computation.
+- `code/R/04_02_DEG_DESeq_merged_domains.R`: New script containing all plotting code (volcano, MA, heatmap, summary bar) extracted from `04_DEG_DESeq_merged_domains.R`. Reads saved CSV results and produces all visualizations independently of the DEG computation.
+
+### Changed
+- `code/R/05_DEG_DESeq_cellxdomains.R`: Removed plotting sections (volcano, MA, heatmap, summary bar). Script now only performs DEG calculation and saves result tables. Plotting is handled by `05_02_DEG_DESeq_cellxdomains.R`.
+- `code/R/04_DEG_DESeq_merged_domains.R`: Removed plotting sections (volcano, MA, heatmap, summary bar, pseudobulk QC plots). Script now only performs DEG calculation and saves result tables. Plotting is handled by `04_02_DEG_DESeq_merged_domains.R`.
+
+---
+
 ## 2026-07-23
 
 ### Changed

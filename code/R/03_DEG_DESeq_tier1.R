@@ -10,6 +10,7 @@ library(ggrepel)
 library(pheatmap)
 library(dplyr)
 library(tidyr)
+library(patchwork)
 
 # =============================================================================
 # Parameters
@@ -429,6 +430,7 @@ cat("\nGenerating volcano plots...\n")
 volcano_dir <- file.path(OUTPUT_DIR, "volcano_plots")
 dir.create(volcano_dir, recursive = TRUE, showWarnings = FALSE)
 
+plot_list <- list()
 for (ct in names(all_results)) {
   res_df <- all_results[[ct]]
   res_df <- res_df[!is.na(res_df$padj) & is.finite(res_df$padj), ]
@@ -453,18 +455,24 @@ for (ct in names(all_results)) {
                     aes(label = gene),
                     size = 2.5, max.overlaps = 15,
                     color = "black") +
-    labs(title = paste(TEST_CONDITION, "vs", REFERENCE_CONDITION, "—", ct),
+    labs(title = paste(TEST_CONDITION, "vs", REFERENCE_CONDITION, " in ", ct),
          x = paste0("Log2 Fold Change (", TEST_CONDITION, " / ", REFERENCE_CONDITION, ")"),
          y = "-log10(adjusted p-value)",
          color = NULL) +
     theme_publication() +
     theme(legend.position = "bottom")
+  
+  plot_list[[ct]] <- p
 
   ct_safe <- gsub("[^A-Za-z0-9_]", "_", ct)
   ggsave(file.path(volcano_dir, paste0("volcano_", ct_safe, ".pdf")),
-         p, width = 7, height = 6)
+         p, width = 4, height = 3)
 }
 
+combined <- wrap_plots((plot_list),ncol = 3)
+
+  ggsave(file.path(volcano_dir, paste0("volcano_all_cells", ".pdf")),
+         combined, width = 12, height = 20)
 # =============================================================================
 # 8. Summary bar plot: number of DEGs per cell type
 # =============================================================================

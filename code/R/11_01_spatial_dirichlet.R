@@ -1,6 +1,9 @@
 # 11_spatial_dirichlet.R
-# Dirichlet multinomial regression for differential immune cell type proportions
-# between DKO and WT conditions.
+# Dirichlet multinomial regression for differential composition between DKO and
+# WT conditions. Three separate analyses:
+#   (1) immune cell type proportions,
+#   (2) epithelial & fibroblast proportions,
+#   (3) spatial domain (Banksy merged) proportions.
 
 library(Seurat)
 library(ggplot2)
@@ -27,30 +30,36 @@ source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 CELLTYPES_OF_INTEREST <- IMMUNE_CELLTYPES
 
 # =============================================================================
-# 1. Load Seurat object
+# 1. Load Seurat object once (one-time I/O)
 # =============================================================================
-seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
-cat("Loaded:", ncol(seu), "cells\n")
+seu_full <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
+cat("Loaded:", ncol(seu_full), "cells\n")
 
-# Recode condition and set factor levels
-seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
-seu$condition <- factor(seu$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
-seu$sample <- factor(seu$sample,
-                     levels = intersect(names(SAMPLE_COLORS), unique(seu$sample)))
+# Apply universal QC filter and factor levels to the main object
+seu_full$condition <- gsub("^KO$", TEST_CONDITION, seu_full$condition)
+seu_full$condition <- factor(seu_full$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
+seu_full$sample <- factor(seu_full$sample,
+                          levels = intersect(names(SAMPLE_COLORS), unique(seu_full$sample)))
 
-# QC filter
-keep_qc <- seu$total_counts >= MIN_TOTAL_COUNTS &
-            seu$n_genes_by_counts >= MIN_GENES_DETECTED
-seu <- subset(seu, cells = colnames(seu)[keep_qc])
-cat(sprintf("After QC: %d cells\n", ncol(seu)))
+keep_qc_all <- seu_full$total_counts >= MIN_TOTAL_COUNTS &
+               seu_full$n_genes_by_counts >= MIN_GENES_DETECTED
+seu_full <- subset(seu_full, cells = colnames(seu_full)[keep_qc_all])
+cat(sprintf("After QC: %d cells\n", ncol(seu_full)))
 
-# Keep only immune cell types of interest
+# =============================================================================
+# 2. IMMUNE CELL ANALYSIS (copy and filter seu_full)
+# =============================================================================
+cat("\n\n================================================================\n")
+cat("=== Dirichlet regression: DKO vs WT (immune cell composition) ===\n")
+cat("================================================================\n")
+
+seu <- seu_full
 seu <- subset(seu, subset = Tier1_celltype %in% CELLTYPES_OF_INTEREST)
 seu$Tier1_celltype <- droplevels(factor(seu$Tier1_celltype, levels = CELLTYPES_OF_INTEREST))
-cat(sprintf("After filtering to immune cell types: %d cells\n", ncol(seu)))
+cat(sprintf("Immune analysis: %d cells\n", ncol(seu)))
 
 # =============================================================================
-# 2. Build count table: sample x cell type
+# 2a. Build count table: sample x cell type
 # =============================================================================
 count_df <- seu@meta.data %>%
   group_by(sample, condition, Tier1_celltype, .drop = TRUE) %>%
@@ -82,11 +91,8 @@ for (ct in ct_cols) {
 }
 
 # =============================================================================
-# 4. Dirichlet regression: DKO vs WT
+# 2b. Dirichlet regression: DKO vs WT
 # =============================================================================
-cat("\n\n================================================================\n")
-cat("=== Dirichlet regression: DKO vs WT (immune cell composition) ===\n")
-cat("================================================================\n")
 
 dr_data <- as.data.frame(prop_df)
 dr_data$condition <- factor(dr_data$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
@@ -147,9 +153,9 @@ prop_out <- count_df %>%
 write.csv(prop_out, file.path(OUTPUT_DIR, "immune_proportions_per_sample.csv"), row.names = FALSE)
 
 # =============================================================================
-# 5. Visualization: Observed proportions stacked bar
+# 2c. Visualization: Observed proportions stacked bar
 # =============================================================================
-cat("\nGenerating plots...\n")
+cat("\nGenerating immune plots...\n")
 
 obs_prop <- count_df %>%
   pivot_longer(cols = all_of(ct_cols), names_to = "celltype", values_to = "n") %>%
@@ -173,7 +179,7 @@ p_stack <- ggplot(obs_prop, aes(x = sample, y = prop, fill = celltype)) +
 ggsave(file.path(OUTPUT_DIR, "immune_composition_stacked_bar.pdf"), p_stack, width = 10, height = 6)
 
 # =============================================================================
-# 6. Visualization: Boxplot of proportions by condition (with significance)
+# 2d. Visualization: Boxplot of proportions by condition (with significance)
 # =============================================================================
 
 # Prepare significance labels from Dirichlet results
@@ -219,7 +225,7 @@ if (nrow(sig_labels) > 0) {
 ggsave(file.path(OUTPUT_DIR, "immune_proportions_boxplot.pdf"), p_box, width = 10, height = 5)
 
 # =============================================================================
-# 6b. Visualization: Collapsed stacked bar (DKO vs WT)
+# 2e. Visualization: Collapsed stacked bar (DKO vs WT)
 # =============================================================================
 collapsed_prop <- count_df %>%
   group_by(condition) %>%
@@ -241,7 +247,7 @@ p_collapsed <- ggplot(collapsed_prop, aes(x = condition, y = prop, fill = cellty
 ggsave(file.path(OUTPUT_DIR, "immune_composition_collapsed.pdf"), p_collapsed, width = 7, height = 6)
 
 # =============================================================================
-# 7. Visualization: Dot plot of Dirichlet results
+# 2f. Visualization: Dot plot of Dirichlet results
 # =============================================================================
 results_df$celltype <- factor(results_df$celltype, levels = rev(CELLTYPES_OF_INTEREST))
 
@@ -261,7 +267,7 @@ p_dot <- ggplot(results_df, aes(x = estimate, y = celltype,
 ggsave(file.path(OUTPUT_DIR, "dirichlet_DKOvsWT_dotplot.pdf"), p_dot, width = 7, height = 6)
 
 # #############################################################################
-# EPITHELIAL & FIBROBLAST: Dirichlet regression DKO vs WT
+# 3. EPITHELIAL & FIBROBLAST ANALYSIS (copy and filter seu_full)
 # #############################################################################
 cat("\n\n================================================================\n")
 cat("=== Dirichlet regression: DKO vs WT (Epithelial & Fibroblasts) ===\n")
@@ -269,19 +275,7 @@ cat("================================================================\n")
 
 EPI_FIB_CELLTYPES <- EPITHELIAL_STROMAL_CELLTYPES
 
-# Reload full object for non-immune cell types
-seu_ef <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
-seu_ef$condition <- gsub("^KO$", TEST_CONDITION, seu_ef$condition)
-seu_ef$condition <- factor(seu_ef$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
-seu_ef$sample <- factor(seu_ef$sample,
-                        levels = intersect(names(SAMPLE_COLORS), unique(seu_ef$sample)))
-
-# QC filter
-keep_qc_ef <- seu_ef$total_counts >= MIN_TOTAL_COUNTS &
-              seu_ef$n_genes_by_counts >= MIN_GENES_DETECTED
-seu_ef <- subset(seu_ef, cells = colnames(seu_ef)[keep_qc_ef])
-
-# Keep only cell types present in data
+seu_ef <- seu_full
 available_ef <- intersect(EPI_FIB_CELLTYPES, unique(seu_ef$Tier1_celltype))
 seu_ef <- subset(seu_ef, subset = Tier1_celltype %in% available_ef)
 seu_ef$Tier1_celltype <- droplevels(factor(seu_ef$Tier1_celltype, levels = available_ef))
@@ -456,6 +450,200 @@ p_dot_ef <- ggplot(results_df_ef, aes(x = estimate, y = celltype,
 
 ggsave(file.path(OUTPUT_DIR, "dirichlet_DKOvsWT_epi_fib_dotplot.pdf"), p_dot_ef, width = 7, height = 5)
 
+# #############################################################################
+# 4. SPATIAL DOMAINS ANALYSIS (use seu_full directly, no additional filtering)
+# #############################################################################
+# Biological question: does the tissue-level composition of spatial domains
+# (Baysor/Banksy merged domains) differ between DKO and WT tumors? Each sample
+# contributes one observation whose "categories" are the merged spatial domains
+# rather than cell types.
+cat("\n\n================================================================\n")
+cat("=== Dirichlet regression: DKO vs WT (spatial domain composition) ===\n")
+cat("================================================================\n")
+
+# Create a copy to avoid reference issues with downstream subsetting
+seu_dom <- seu_full[, colnames(seu_full)]
+
+# Map numeric domain IDs -> named domains; keep only the merged domains of interest
+domain_ids <- as.character(seu_dom@meta.data[[COL_DOMAIN]])
+domain_names <- DOMAIN_NAMES[domain_ids]
+seu_dom <- AddMetaData(seu_dom, metadata = data.frame(domain_name = domain_names, row.names = colnames(seu_dom)))
+
+# Subset to cells with valid domain assignments
+seu_dom <- subset(seu_dom, cells = colnames(seu_dom)[!is.na(seu_dom$domain_name)])
+seu_dom$domain_name <- droplevels(factor(seu_dom$domain_name, levels = DOMAIN_ORDER))
+cat(sprintf("Spatial domain analysis: %d cells, %d domains\n",
+            ncol(seu_dom), nlevels(seu_dom$domain_name)))
+
+dom_cols <- intersect(DOMAIN_ORDER, levels(seu_dom$domain_name))
+
+# Build count table: sample x domain
+count_df_dom <- seu_dom@meta.data %>%
+  group_by(sample, condition, domain_name, .drop = TRUE) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  pivot_wider(names_from = domain_name, values_from = n, values_fill = 0) %>%
+  as.data.frame()
+
+cat("\nCell counts per sample (spatial domains):\n")
+print(count_df_dom)
+
+# Proportions with pseudocount
+count_df_dom$total <- rowSums(count_df_dom[, dom_cols])
+prop_df_dom <- count_df_dom
+for (dm in dom_cols) {
+  prop_df_dom[[dm]] <- count_df_dom[[dm]] + (count_df_dom$total / sum(count_df_dom$total))
+}
+prop_df_dom$total_adj <- rowSums(prop_df_dom[, dom_cols])
+for (dm in dom_cols) {
+  prop_df_dom[[dm]] <- prop_df_dom[[dm]] / prop_df_dom$total_adj
+}
+
+# Dirichlet regression
+dr_data_dom <- as.data.frame(prop_df_dom)
+dr_data_dom$condition <- factor(dr_data_dom$condition, levels = c(REFERENCE_CONDITION, TEST_CONDITION))
+AL_dom <- DR_data(dr_data_dom[, dom_cols])
+
+fit_dom <- DirichReg(AL_dom ~ condition, data = dr_data_dom)
+fit_null_dom <- DirichReg(AL_dom ~ 1, data = dr_data_dom)
+
+cat("\nLikelihood ratio test (condition effect, spatial domains):\n")
+lr_test_dom <- anova(fit_null_dom, fit_dom)
+print(lr_test_dom)
+
+# Extract results
+u_dom <- summary(fit_dom)
+coef_mat_dom <- u_dom$coef.mat
+pvals_rows_dom <- grep("Intercept", rownames(coef_mat_dom), invert = TRUE)
+pvals_dom <- coef_mat_dom[pvals_rows_dom, 4]
+estimates_dom <- coef_mat_dom[pvals_rows_dom, 1]
+
+results_df_dom <- data.frame(
+  domain = u_dom$varnames,
+  estimate = estimates_dom,
+  pval = pvals_dom,
+  stringsAsFactors = FALSE
+)
+results_df_dom$p.adj <- p.adjust(results_df_dom$pval, method = "fdr")
+results_df_dom$direction <- ifelse(results_df_dom$estimate > 0, "Up in DKO", "Up in WT")
+results_df_dom$significant <- results_df_dom$p.adj < FDR_THRESHOLD
+results_df_dom <- results_df_dom[order(results_df_dom$pval), ]
+
+cat("\nResults (spatial domains; positive estimate = higher proportion in DKO):\n")
+print(results_df_dom)
+
+# Save
+write.csv(results_df_dom, file.path(OUTPUT_DIR, "dirichlet_DKOvsWT_domains.csv"), row.names = FALSE)
+write.csv(count_df_dom, file.path(OUTPUT_DIR, "domain_counts_per_sample.csv"), row.names = FALSE)
+
+prop_out_dom <- count_df_dom %>%
+  pivot_longer(cols = all_of(dom_cols), names_to = "domain", values_to = "n") %>%
+  group_by(sample) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ungroup()
+write.csv(prop_out_dom, file.path(OUTPUT_DIR, "domain_proportions_per_sample.csv"), row.names = FALSE)
+
+# --- Plots for spatial domains ---
+
+# Stacked bar per sample
+obs_prop_dom <- count_df_dom %>%
+  pivot_longer(cols = all_of(dom_cols), names_to = "domain", values_to = "n") %>%
+  group_by(sample) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  mutate(domain = factor(domain, levels = DOMAIN_ORDER))
+
+obs_prop_dom <- obs_prop_dom %>%
+  left_join(distinct(count_df_dom[, c("sample", "condition")]), by = c("sample", "condition"))
+
+p_stack_dom <- ggplot(obs_prop_dom, aes(x = sample, y = prop, fill = domain)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = DOMAIN_COLORS, name = "Spatial domain") +
+  labs(title = "Spatial domain composition per sample",
+       x = NULL, y = "Proportion") +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(file.path(OUTPUT_DIR, "domain_composition_stacked_bar.pdf"), p_stack_dom, width = 10, height = 6)
+
+# Collapsed bar
+collapsed_prop_dom <- count_df_dom %>%
+  group_by(condition) %>%
+  summarise(across(all_of(dom_cols), sum), .groups = "drop") %>%
+  pivot_longer(cols = all_of(dom_cols), names_to = "domain", values_to = "n") %>%
+  group_by(condition) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup() %>%
+  mutate(domain = factor(domain, levels = DOMAIN_ORDER))
+
+p_collapsed_dom <- ggplot(collapsed_prop_dom, aes(x = condition, y = prop, fill = domain)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  scale_fill_manual(values = DOMAIN_COLORS, name = "Spatial domain") +
+  labs(title = "Spatial domain composition: DKO vs WT (pooled)",
+       x = NULL, y = "Proportion") +
+  theme_publication() +
+  theme(legend.position = "right")
+
+ggsave(file.path(OUTPUT_DIR, "domain_composition_collapsed.pdf"), p_collapsed_dom, width = 7, height = 6)
+
+# Boxplot with significance
+sig_labels_dom <- results_df_dom %>%
+  mutate(
+    label = case_when(
+      p.adj < 0.001 ~ "***",
+      p.adj < 0.01  ~ "**",
+      p.adj < 0.05  ~ "*",
+      p.adj < 0.1   ~ "^",
+      TRUE          ~ ""
+    ),
+    domain = factor(domain, levels = DOMAIN_ORDER)
+  )
+
+y_positions_dom <- obs_prop_dom %>%
+  group_by(domain) %>%
+  summarise(y_max = max(prop) * 1.05, .groups = "drop")
+
+sig_labels_dom <- sig_labels_dom %>%
+  left_join(y_positions_dom, by = "domain") %>%
+  filter(label != "")
+
+p_box_dom <- ggplot(obs_prop_dom, aes(x = domain, y = prop, fill = condition)) +
+  geom_boxplot(outlier.size = 0.8, alpha = 0.8) +
+  geom_point(aes(group = condition), position = position_dodge(width = 0.75),
+             size = 1.5, alpha = 0.6) +
+  scale_fill_manual(values = CONDITION_COLORS) +
+  labs(title = "Spatial domain proportions: DKO vs WT",
+       subtitle = "Dirichlet regression adj. p-value: *** <0.001, ** <0.01, * <0.05, ^ <0.1",
+       x = NULL, y = "Proportion of cells") +
+  theme_publication() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "top")
+
+if (nrow(sig_labels_dom) > 0) {
+  p_box_dom <- p_box_dom +
+    geom_text(data = sig_labels_dom, aes(x = domain, y = y_max, label = label),
+              inherit.aes = FALSE, size = 5, vjust = 0)
+}
+
+ggsave(file.path(OUTPUT_DIR, "domain_proportions_boxplot.pdf"), p_box_dom, width = 8, height = 5)
+
+# Dot plot
+results_df_dom$domain <- factor(results_df_dom$domain, levels = rev(DOMAIN_ORDER))
+
+p_dot_dom <- ggplot(results_df_dom, aes(x = estimate, y = domain,
+                                        size = -log10(p.adj),
+                                        color = estimate)) +
+  geom_point() +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+  scale_color_gradient2(low = "#4575B4", mid = "grey70", high = "#D73027",
+                        midpoint = 0, name = "Estimate") +
+  scale_size_continuous(name = "-log10(FDR)", range = c(2, 8)) +
+  labs(title = "Dirichlet regression: DKO vs WT (Spatial domains)",
+       subtitle = "Positive estimate = enriched in DKO",
+       x = "Estimate (DKO vs WT)", y = NULL) +
+  theme_publication()
+
+ggsave(file.path(OUTPUT_DIR, "dirichlet_DKOvsWT_domains_dotplot.pdf"), p_dot_dom, width = 7, height = 5)
+
 # =============================================================================
 # Done
 # =============================================================================
@@ -472,6 +660,9 @@ cat(sprintf("Significant cell types (FDR < %.2f): %d / %d\n", FDR_THRESHOLD,
 cat(sprintf("\n--- Epithelial & Fibroblasts ---\n"))
 cat(sprintf("Significant cell types (FDR < %.2f): %d / %d\n", FDR_THRESHOLD,
             sum(results_df_ef$significant), nrow(results_df_ef)))
+cat(sprintf("\n--- Spatial Domains ---\n"))
+cat(sprintf("Significant domains (FDR < %.2f): %d / %d\n", FDR_THRESHOLD,
+            sum(results_df_dom$significant), nrow(results_df_dom)))
 cat("\nFiles generated:\n")
 cat("  Immune:\n")
 cat("    - dirichlet_DKOvsWT_immune.csv\n")
@@ -489,3 +680,12 @@ cat("    - epi_fib_composition_stacked_bar.pdf\n")
 cat("    - epi_fib_composition_collapsed.pdf\n")
 cat("    - epi_fib_proportions_boxplot.pdf\n")
 cat("    - dirichlet_DKOvsWT_epi_fib_dotplot.pdf\n")
+cat("  Spatial Domains:\n")
+cat("    - dirichlet_DKOvsWT_domains.csv\n")
+cat("    - domain_counts_per_sample.csv\n")
+cat("    - domain_proportions_per_sample.csv\n")
+cat("    - domain_composition_stacked_bar.pdf\n")
+cat("    - domain_composition_collapsed.pdf\n")
+cat("    - domain_proportions_boxplot.pdf\n")
+cat("    - dirichlet_DKOvsWT_domains_dotplot.pdf\n")
+

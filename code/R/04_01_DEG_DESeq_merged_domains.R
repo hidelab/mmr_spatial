@@ -5,7 +5,6 @@
 library(Seurat)
 library(DESeq2)
 library(ggplot2)
-library(ggrepel)
 library(pheatmap)
 library(dplyr)
 library(tidyr)
@@ -374,184 +373,7 @@ for (dom in names(all_results)) {
 }
 
 # =============================================================================
-# 7. Volcano plots
-# =============================================================================
-cat("\nGenerating volcano plots...\n")
-volcano_dir <- file.path(OUTPUT_DIR, "volcano_plots")
-dir.create(volcano_dir, recursive = TRUE, showWarnings = FALSE)
-
-for (dom in names(all_results)) {
-  res_df <- all_results[[dom]]
-  res_df <- res_df[!is.na(res_df$padj) & is.finite(res_df$padj), ]
-
-  if (nrow(res_df) == 0) next
-
-  dom_safe <- gsub("[^A-Za-z0-9_]", "_", dom)
-  dom_name <- DOMAIN_NAMES[dom]
-
-  # Top genes to label
-  top_genes <- res_df %>%
-    filter(significance != "NS") %>%
-    arrange(padj) %>%
-    head(VOLCANO_TOP_N)
-
-  p <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = significance)) +
-    geom_point(alpha = 0.5, size = 0.8) +
-    scale_color_manual(values = c("Up in DKO" = "#D73027",
-                                  "Down in DKO" = "#4575B4",
-                                  "NS" = "grey60")) +
-    geom_vline(xintercept = c(-LFC_THRESHOLD, LFC_THRESHOLD),
-               linetype = "dashed", color = "grey40") +
-    geom_hline(yintercept = -log10(FDR_THRESHOLD),
-               linetype = "dashed", color = "grey40") +
-    geom_text_repel(data = top_genes,
-                    aes(label = gene),
-                    size = 2.5, max.overlaps = 15,
-                    color = "black") +
-    labs(title = paste0("DKO vs WT — Domain ", dom, " (", gsub("_", " ", dom_name), ")"),
-         x = "Log2 Fold Change (DKO / WT)",
-         y = "-log10(adjusted p-value)",
-         color = NULL) +
-    theme_publication() +
-    theme(legend.position = "bottom")
-
-  ggsave(file.path(volcano_dir, paste0("volcano_merged_domain_", dom_safe, "_", dom_name, ".pdf")),
-         p, width = 7, height = 6)
-}
-
-# =============================================================================
-# 8. Summary bar plot: number of DEGs per merged domain
-# =============================================================================
-if (nrow(summary_stats) > 0) {
-  deg_long <- summary_stats %>%
-    select(domain, n_up_DKO, n_down_DKO) %>%
-    pivot_longer(cols = c(n_up_DKO, n_down_DKO),
-                 names_to = "direction", values_to = "n_DEGs") %>%
-    mutate(direction = ifelse(direction == "n_up_DKO", "Up in DKO", "Down in DKO"),
-           n_DEGs_signed = ifelse(direction == "Up in DKO", n_DEGs, -n_DEGs))
-
-  p_bar <- ggplot(deg_long, aes(x = reorder(domain, -abs(n_DEGs_signed)),
-                                y = n_DEGs_signed, fill = direction)) +
-    geom_bar(stat = "identity") +
-    scale_fill_manual(values = c("Up in DKO" = "#D73027", "Down in DKO" = "#4575B4")) +
-    geom_hline(yintercept = 0, color = "black") +
-    coord_flip() +
-    labs(title = sprintf("DEGs per merged domain (FDR < %.2f, |LFC| > %.1f)",
-                         FDR_THRESHOLD, LFC_THRESHOLD),
-         x = "Merged Domain", y = "Number of DEGs", fill = NULL) +
-    theme_publication() +
-    theme(legend.position = "bottom")
-
-  ggsave(file.path(OUTPUT_DIR, "DEG_count_per_merged_domain.pdf"), p_bar, width = 8, height = 6)
-}
-
-# =============================================================================
-# 9. Heatmap of top DEGs across merged domains (signed -log10 p-value)
-# =============================================================================
-cat("Generating cross-domain heatmap (signed -log10 p-value)...\n")
-
-# Collect all significant DEGs across domains (no slice_head limit)
-sig_genes <- combined_res %>%
-  filter(significance != "NS") %>%
-  pull(gene) %>%
-  unique()
-
-if (length(sig_genes) > 0) {
-  # Compute signed -log10(pvalue): sign(LFC) * -log10(pvalue)
-  # For non-significant comparisons, set value to 0
-  heatmap_df <- combined_res %>%
-    filter(gene %in% sig_genes) %>%
-    mutate(
-      signed_logp = ifelse(
-        significance != "NS",
-        sign(log2FoldChange) * -log10(pvalue),
-        0
-      ),
-      domain_label = DOMAIN_NAMES[domain]
-    ) %>%
-    select(gene, domain_label, signed_logp) %>%
-    pivot_wider(names_from = domain_label, values_from = signed_logp) %>%
-    tibble::column_to_rownames("gene")
-
-  # Replace NA (gene not tested in a domain) with 0
-  heatmap_df[is.na(heatmap_df)] <- 0
-
-  # Cap extreme values for visualization at 99th percentile
-  cap_val <- quantile(abs(as.matrix(heatmap_df)[as.matrix(heatmap_df) != 0]), 0.99)
-  heatmap_df[heatmap_df > cap_val] <- cap_val
-  heatmap_df[heatmap_df < -cap_val] <- -cap_val
-
-  # Only plot if we have enough genes
-  if (nrow(heatmap_df) >= 3 && ncol(heatmap_df) >= 2) {
-    pdf(file.path(OUTPUT_DIR, "DEG_heatmap_top_genes.pdf"),
-        width = max(8, ncol(heatmap_df) * 0.5 + 3),
-        height = max(8, nrow(heatmap_df) * 0.25 + 2))
-    pheatmap(as.matrix(heatmap_df),
-             color = colorRampPalette(c("#4575B4", "white", "#D73027"))(100),
-             breaks = seq(-cap_val, cap_val, length.out = 101),
-             cluster_rows = TRUE,
-             cluster_cols = FALSE,
-             treeheight_row = 0,
-             main = "Significant DEGs — signed -log10(p-value) (DKO vs WT) by Merged Domain",
-             fontsize_row = 10,
-             fontsize_col = 10)
-    dev.off()
-  }
-}
-
-# =============================================================================
-# 10. MA plots
-# =============================================================================
-cat("Generating MA plots...\n")
-ma_dir <- file.path(OUTPUT_DIR, "MA_plots")
-dir.create(ma_dir, recursive = TRUE, showWarnings = FALSE)
-
-for (dom in names(all_results)) {
-  res_df <- all_results[[dom]]
-  res_df <- res_df[!is.na(res_df$padj) & !is.na(res_df$baseMean), ]
-
-  if (nrow(res_df) == 0) next
-
-  dom_safe <- gsub("[^A-Za-z0-9_]", "_", dom)
-  dom_name <- DOMAIN_NAMES[dom]
-
-  p_ma <- ggplot(res_df, aes(x = log10(baseMean + 1), y = log2FoldChange, color = significance)) +
-    geom_point(alpha = 0.5, size = 0.8) +
-    scale_color_manual(values = c("Up in DKO" = "#D73027",
-                                  "Down in DKO" = "#4575B4",
-                                  "NS" = "grey60")) +
-    geom_hline(yintercept = 0, linetype = "solid", color = "black") +
-    geom_hline(yintercept = c(-LFC_THRESHOLD, LFC_THRESHOLD),
-               linetype = "dashed", color = "grey40") +
-    labs(title = paste0("MA plot — DKO vs WT — Domain ", dom, " (", gsub("_", " ", dom_name), ")"),
-         x = "log10(Mean Expression + 1)",
-         y = "Log2 Fold Change",
-         color = NULL) +
-    theme_publication() +
-    theme(legend.position = "bottom")
-
-  ggsave(file.path(ma_dir, paste0("MA_merged_domain_", dom_safe, "_", dom_name, ".pdf")), p_ma, width = 7, height = 5)
-}
-
-# =============================================================================
-# 11. Pseudobulk QC: sample-level cell counts and library sizes
-# =============================================================================
-cat("Generating pseudobulk QC plots...\n")
-
-# Cell count per pseudobulk sample
-p_qc <- ggplot(pb_meta, aes(x = reorder(group, -n_cells), y = n_cells, fill = condition)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = CONDITION_COLORS) +
-  coord_flip() +
-  labs(title = "Cells per pseudobulk sample (by merged domain)", x = NULL, y = "Number of cells") +
-  theme_publication() +
-  theme(axis.text.y = element_text(size = 6))
-
-ggsave(file.path(OUTPUT_DIR, "pseudobulk_cell_counts.pdf"), p_qc,
-       width = 10, height = max(6, nrow(pb_meta) * 0.2 + 2))
-
-# =============================================================================
-# Done
+# 7. Done
 # =============================================================================
 cat("\n\n========================================\n")
 cat("DEG analysis by merged spatial domain complete!\n")
@@ -571,10 +393,7 @@ cat("\nFiles generated:\n")
 cat("  - DEG_all_merged_domains.csv (combined results)\n")
 cat("  - DEG_summary.csv (per-domain summary)\n")
 cat("  - per_domain/ (individual result CSVs)\n")
-cat("  - volcano_plots/ (per-domain volcano PDFs)\n")
-cat("  - MA_plots/ (per-domain MA PDFs)\n")
-cat("  - DEG_heatmap_top_genes.pdf\n")
-cat("  - DEG_count_per_merged_domain.pdf\n")
-cat("  - pseudobulk_cell_counts.pdf\n")
+cat("  - pseudobulk_profiles/ (per-domain pseudobulk CSVs)\n")
 cat("  - cell_filtering_report.csv\n")
-cat("  - diagnostics/domain_celltype_composition.pdf\n")
+cat("  - diagnostics/ (QC plots)\n")
+cat("\nRun 04_02_DEG_DESeq_merged_domains.R for volcano, MA, heatmap, and summary plots.\n")
