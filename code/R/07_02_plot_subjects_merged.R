@@ -43,6 +43,12 @@ domain_ids_ordered <- names(DOMAIN_NAMES)[match(DOMAIN_ORDER, DOMAIN_NAMES)]
 domains            <- domain_ids_ordered[domain_ids_ordered %in% domains_present]
 sample_ids <- levels(seu$sample)
 
+# Compute max span across all samples for uniform unit scale
+all_spatial <- Embeddings(seu, "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 cat(sprintf("Plotting %d samples, each with %d merged domain panels\n",
             length(sample_ids), length(domains)))
 
@@ -60,11 +66,9 @@ build_sample_panels <- function(s, show_titles = TRUE, row_label = NULL) {
   # Use `cells =` (not NSE `subset =`) so this works inside a function
   sub <- subset(seu, cells = colnames(seu)[seu$sample == s])
 
-  # Shared coordinate limits for this sample, so every panel is drawn on the
-  # exact same canvas under coord_fixed() -> identical on-screen point size.
-  emb <- Embeddings(sub, reduction = "spatial")
-  xr  <- range(emb[, 1])
-  yr  <- range(emb[, 2])
+  # Use global coordinate limits so all samples share the same unit scale
+  xr <- c(-half_span, half_span)
+  yr <- c(-half_span, half_span)
 
   # Per-domain highlight panels: domain cells keep their original color, rest grey.
   # unname() the domain color so the named vector element does not mangle the

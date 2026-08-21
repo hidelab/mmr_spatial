@@ -34,6 +34,12 @@ seu$sample <- factor(seu$sample,
 domains <- sort(unique(as.character(seu@meta.data[[DOMAIN_COL]])))
 sample_ids <- levels(seu$sample)
 
+# Compute max span across all samples for uniform unit scale
+all_spatial <- Embeddings(seu, "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 cat(sprintf("Plotting %d merged domains across %d samples\n", length(domains), length(sample_ids)))
 
 # --- Individual domain highlight plots ---
@@ -54,7 +60,7 @@ for (dom in domains) {
       ggtitle(s) +
       NoAxes() +
       NoLegend() +
-      coord_fixed()
+      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span))
   })
 
   p <- wrap_plots(plots, nrow = 1) +

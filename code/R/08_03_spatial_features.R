@@ -36,6 +36,12 @@ DefaultAssay(seu) <- "RNA"
 
 sample_ids <- levels(seu$sample)
 
+# Compute max span across all samples for uniform unit scale
+all_spatial <- Embeddings(seu, "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 # Filter to genes present in the dataset
 available_genes <- intersect(GENES, rownames(seu))
 missing_genes <- setdiff(GENES, rownames(seu))
@@ -58,7 +64,7 @@ for (gene in available_genes) {
       scale_color_viridis(option = "magma", name = gene) +
       ggtitle(s) +
       NoAxes() +
-      coord_fixed()
+      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span))
   })
 
   p <- wrap_plots(plots, nrow = 1) +

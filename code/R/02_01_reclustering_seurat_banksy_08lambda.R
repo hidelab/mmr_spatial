@@ -78,10 +78,13 @@ cat("Available assays:", paste(Assays(seu), collapse = ", "), "\n")
 seu <- RunPCA(seu, assay = "BANKSY", features = rownames(seu[["BANKSY"]]), npcs = BANKSY_NPCS)
 
 # --- 6. Harmony batch correction across samples ---------------------------------
+set.seed(42)
 seu <- RunHarmony(seu, group.by.vars = HARMONY_GROUP_VAR, reduction.use = "pca")
 cat("Harmony correction complete.\n")
 
 # --- 7. Clustering sweep over nPCs and resolutions ------------------------------
+set.seed(42)
+
 npc_values <- c(BANKSY_NPC_USE)
 resolutions <- c(BANKSY_RESOLUTION)
 
@@ -97,82 +100,104 @@ cluster_cols <- grep("^banksy_clust_pc", colnames(seu@meta.data), value = TRUE)
 cat("Cluster columns created:\n")
 print(cluster_cols)
 
-# --- 8. UMAP for visualization --------------------------------------------------
-seu <- RunUMAP(seu, reduction = "harmony", dims = 1:BANKSY_NPC_USE,
-               reduction.name = "umap_banksy")
+# --- 8. UMAP for visualization (optional, slow) --------------------------------
+if (RUN_UMAP) {
+  seu <- RunUMAP(seu, reduction = "harmony", dims = 1:BANKSY_NPC_USE,
+                 reduction.name = "umap_banksy")
 
-# --- 9. Visualization -----------------------------------------------------------
+  # --- 9. Visualization -----------------------------------------------------------
 
-# Pick a primary clustering for plots
+  # Pick a primary clustering for plots
+  primary_clust <- paste0("banksy_clust_pc", BANKSY_NPC_USE, "_res.", BANKSY_RESOLUTION)
+  if (!primary_clust %in% colnames(seu@meta.data)) {
+    primary_clust <- cluster_cols[1]
+  }
+  cat("Primary clustering for plots:", primary_clust, "\n")
+
+  # UMAP: Banksy clusters vs cell type
+  p_clust <- DimPlot(seu, reduction = "umap_banksy", group.by = primary_clust,
+                     pt.size = 1, shuffle = TRUE,
+                     raster = TRUE, raster.dpi = c(300, 300)) +
+    ggtitle("Banksy Clusters") +
+    NoAxes()
+
+  p_ct <- DimPlot(seu, reduction = "umap_banksy", group.by = "Tier1_celltype",
+                  pt.size = 1, cols = TIER1_COLORS, shuffle = TRUE,
+                  raster = TRUE, raster.dpi = c(300, 300)) +
+    ggtitle("Cell Type") +
+    NoAxes() +
+    guides(color = guide_legend(override.aes = list(size = 3), ncol = 1))
+
+  ggsave(file.path(OUTPUT_DIR, "umap_banksy_clusters.jpg"), p_clust, width = 7, height = 5, dpi = 300)
+  ggsave(file.path(OUTPUT_DIR, "umap_banksy_celltype.jpg"), p_ct, width = 9, height = 6, dpi = 300)
+  ggsave(file.path(OUTPUT_DIR, "umap_banksy_clusters_vs_celltype.jpg"),
+         p_clust + p_ct, width = 16, height = 6, dpi = 300)
+
+  # UMAP: condition and sample
+  p_cond <- DimPlot(seu, reduction = "umap_banksy", group.by = "condition",
+                    pt.size = 1, cols = CONDITION_COLORS, shuffle = TRUE,
+                    raster = TRUE, raster.dpi = c(300, 300)) +
+    ggtitle("Condition") +
+    NoAxes() +
+    guides(color = guide_legend(override.aes = list(size = 3)))
+
+  p_samp <- DimPlot(seu, reduction = "umap_banksy", group.by = "sample",
+                    pt.size = 1, cols = SAMPLE_COLORS, shuffle = TRUE,
+                    raster = TRUE, raster.dpi = c(300, 300)) +
+    ggtitle("Sample") +
+    NoAxes() +
+    guides(color = guide_legend(override.aes = list(size = 3)))
+
+  ggsave(file.path(OUTPUT_DIR, "umap_banksy_condition_sample.jpg"),
+         p_cond + p_samp, width = 13, height = 5, dpi = 300)
+} else {
+  cat("Skipping UMAP (RUN_UMAP = FALSE)\n")
+}
+
+# Pick primary clustering column (needed downstream even without UMAP)
 primary_clust <- paste0("banksy_clust_pc", BANKSY_NPC_USE, "_res.", BANKSY_RESOLUTION)
 if (!primary_clust %in% colnames(seu@meta.data)) {
-  primary_clust <- cluster_cols[1]
+  primary_clust <- grep("^banksy_clust_pc", colnames(seu@meta.data), value = TRUE)[1]
 }
-cat("Primary clustering for plots:", primary_clust, "\n")
 
-# UMAP: Banksy clusters vs cell type
-p_clust <- DimPlot(seu, reduction = "umap_banksy", group.by = primary_clust,
-                   pt.size = 1, shuffle = TRUE,
-                   raster = TRUE, raster.dpi = c(300, 300)) +
-  ggtitle("Banksy Clusters") +
-  NoAxes()
-
-p_ct <- DimPlot(seu, reduction = "umap_banksy", group.by = "Tier1_celltype",
-                pt.size = 1, cols = TIER1_COLORS, shuffle = TRUE,
-                raster = TRUE, raster.dpi = c(300, 300)) +
-  ggtitle("Cell Type") +
-  NoAxes() +
-  guides(color = guide_legend(override.aes = list(size = 3), ncol = 1))
-
-ggsave(file.path(OUTPUT_DIR, "umap_banksy_clusters.pdf"), p_clust, width = 7, height = 5)
-ggsave(file.path(OUTPUT_DIR, "umap_banksy_celltype.pdf"), p_ct, width = 9, height = 6)
-ggsave(file.path(OUTPUT_DIR, "umap_banksy_clusters_vs_celltype.pdf"),
-       p_clust + p_ct, width = 16, height = 6)
-
-# UMAP: condition and sample
-p_cond <- DimPlot(seu, reduction = "umap_banksy", group.by = "condition",
-                  pt.size = 1, cols = CONDITION_COLORS, shuffle = TRUE,
-                  raster = TRUE, raster.dpi = c(300, 300)) +
-  ggtitle("Condition") +
-  NoAxes() +
-  guides(color = guide_legend(override.aes = list(size = 3)))
-
-p_samp <- DimPlot(seu, reduction = "umap_banksy", group.by = "sample",
-                  pt.size = 1, cols = SAMPLE_COLORS, shuffle = TRUE,
-                  raster = TRUE, raster.dpi = c(300, 300)) +
-  ggtitle("Sample") +
-  NoAxes() +
-  guides(color = guide_legend(override.aes = list(size = 3)))
-
-ggsave(file.path(OUTPUT_DIR, "umap_banksy_condition_sample.pdf"),
-       p_cond + p_samp, width = 13, height = 5)
-
-# Spatial plots per sample colored by Banksy cluster
+# Spatial plots per sample colored by Banksy cluster (matched unit scale)
 sample_ids <- levels(seu$sample)
+
+# Compute max span across all samples for uniform scale
+all_spatial <- Embeddings(seu, "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 plots_spatial <- lapply(sample_ids, function(s) {
   sub <- subset(seu, subset = sample == s)
   coords_s <- Embeddings(sub, "spatial")
   df <- data.frame(x = coords_s[, 1], y = coords_s[, 2],
                    cluster = sub@meta.data[[primary_clust]])
-  ggplot(df, aes(x, y, color = cluster)) +
+  p <- ggplot(df, aes(x, y, color = cluster)) +
     geom_point(size = 0.3) +
-    coord_fixed() +
     ggtitle(s) +
     theme_void() +
     theme(plot.title = element_text(hjust = 0.5, face = "bold"),
           legend.position = "none")
+  if (CENTER_COORDS) {
+    p <- p + coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span))
+  } else {
+    p <- p + coord_fixed()
+  }
+  p
 })
 
-p_spatial <- wrap_plots(plots_spatial, ncol = 4) +
-  plot_annotation(title = "Banksy Spatial Domains",
-                  theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)))
-ggsave(file.path(OUTPUT_DIR, "spatial_banksy_clusters.pdf"), p_spatial, width = 16, height = 10)
+# p_spatial <- wrap_plots(plots_spatial, ncol = 4) +
+#   plot_annotation(title = "Banksy Spatial Domains",
+#                   theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)))
+# ggsave(file.path(OUTPUT_DIR, "spatial_banksy_clusters.pdf"), p_spatial, width = 16, height = 10)
 
 # Cluster composition heatmap: Banksy clusters vs Tier1 cell types
 ct <- table(seu@meta.data[[primary_clust]], seu$Tier1_celltype)
 ct_prop <- prop.table(ct, margin = 1)
 
-pdf(file.path(OUTPUT_DIR, "heatmap_cluster_vs_celltype.pdf"), width = 10, height = 8)
+jpeg(file.path(OUTPUT_DIR, "heatmap_cluster_vs_celltype.jpg"), width = 10, height = 8, units = "in", res = 300)
 heatmap(ct_prop, scale = "none", margins = c(12, 8),
         main = "Banksy clusters vs cell types (row-normalized)",
         col = colorRampPalette(c("white", "navy"))(50))
@@ -187,9 +212,12 @@ p_bar <- ggplot(ct_cond, aes(x = condition, y = proportion, fill = cluster)) +
   labs(x = NULL, y = "Proportion", fill = "Cluster") +
   theme_publication()
 
-ggsave(file.path(OUTPUT_DIR, "barplot_cluster_by_condition.pdf"), p_bar, width = 5, height = 6)
+ggsave(file.path(OUTPUT_DIR, "barplot_cluster_by_condition.jpg"), p_bar, width = 5, height = 6, dpi = 300)
 
 # --- 10. Save results -----------------------------------------------------------
+# Create the standardized column name that 02_03 expects (DOMAIN_SOURCE_COL = "banksy_res_0.8")
+seu[[paste0("banksy_res_", BANKSY_RESOLUTION)]] <- seu@meta.data[[primary_clust]]
+
 BANKSY_RDS <- file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds")
 saveRDS(seu, BANKSY_RDS)
 cat("\nSeurat object with Banksy results saved to:", BANKSY_RDS, "\n")

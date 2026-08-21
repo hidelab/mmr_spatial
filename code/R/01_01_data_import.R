@@ -25,6 +25,16 @@ sobj <- adata$as_Seurat()
 # Add spatial coordinates
 coords <- adata$obsm[["spatial"]]
 colnames(coords) <- c("spatial_1", "spatial_2")
+
+if (CENTER_COORDS) {
+  sample_ids <- adata$obs$sample
+  for (samp in unique(sample_ids)) {
+    idx <- which(sample_ids == samp)
+    coords[idx, 1] <- coords[idx, 1] - mean(coords[idx, 1])
+    coords[idx, 2] <- coords[idx, 2] - mean(coords[idx, 2])
+  }
+}
+
 sobj[["spatial"]] <- CreateDimReducObject(
   embeddings = coords,
   key = "spatial_",
@@ -122,17 +132,29 @@ if ("umap" %in% Reductions(sobj)) {
   ggsave(file.path(OUTPUT_DIR, "umap_overview_panel.pdf"), p_combined, width = 14, height = 12)
 }
 
-# Spatial plot of cell types per sample (one row)
+# Spatial plot of cell types per sample (one row, matched unit scale)
 sample_ids <- levels(sobj$sample)
+
+# Compute the max span across all samples to enforce the same unit scale
+all_spatial <- Embeddings(sobj, reduction = "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], sobj$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], sobj$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 spatial_plots <- lapply(sample_ids, function(s) {
   sub <- subset(sobj, subset = sample == s)
-  DimPlot(sub, reduction = "spatial", group.by = "Tier1_celltype", pt.size = 1,
-          cols = TIER1_COLORS, shuffle = TRUE,
-          raster = TRUE, raster.dpi = c(300, 300)) +
+  p <- DimPlot(sub, reduction = "spatial", group.by = "Tier1_celltype", pt.size = 1,
+               cols = TIER1_COLORS, shuffle = TRUE,
+               raster = TRUE, raster.dpi = c(300, 300)) +
     ggtitle(s) +
     NoAxes() +
-    NoLegend() +
-    coord_fixed()
+    NoLegend()
+  if (CENTER_COORDS) {
+    p <- p + coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span))
+  } else {
+    p <- p + coord_fixed()
+  }
+  p
 })
 
 # Shared legend from full object
@@ -168,6 +190,22 @@ p4 <- ggplot(prop_df, aes(x = condition, y = proportion, fill = celltype)) +
   theme(legend.key.size = unit(0.4, "cm"))
 
 ggsave(file.path(OUTPUT_DIR, "celltype_proportions.pdf"), p4, width = 5, height = 6)
+
+# Cell type proportions per sample (stacked bar)
+prop_sample_df <- as.data.frame(prop.table(table(sobj$sample, sobj$Tier1_celltype), margin = 1))
+colnames(prop_sample_df) <- c("sample", "celltype", "proportion")
+prop_sample_df$celltype <- factor(prop_sample_df$celltype, levels = TIER1_ORDER)
+prop_sample_df$sample <- factor(prop_sample_df$sample, levels = names(SAMPLE_COLORS))
+
+p5 <- ggplot(prop_sample_df, aes(x = sample, y = proportion, fill = celltype)) +
+  geom_bar(stat = "identity", position = "stack", color = "white", linewidth = 0.2) +
+  scale_fill_manual(values = TIER1_COLORS, name = "Cell Type", breaks = TIER1_ORDER) +
+  labs(x = NULL, y = "Proportion") +
+  theme_publication() +
+  theme(legend.key.size = unit(0.4, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(file.path(OUTPUT_DIR, "celltype_proportions_per_sample.pdf"), p5, width = 7, height = 6)
 
 # --- 5. Summary statistics tables -----------------------------------------------
 

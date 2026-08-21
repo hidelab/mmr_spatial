@@ -21,6 +21,11 @@ celltypes <- sort(unique(seu$Tier1_celltype))
 sample_ids <- unique(seu$sample)
 coords <- Embeddings(seu, "spatial")
 
+# Compute max span across all samples for uniform unit scale
+max_x_span <- max(tapply(coords[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(coords[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 cat(sprintf("Plotting %d cell types across %d samples\n", length(celltypes), length(sample_ids)))
 
 for (ct in celltypes) {
@@ -40,7 +45,7 @@ for (ct in celltypes) {
     ggplot(df, aes(x, y, color = highlight)) +
       geom_point(size = 0.1) +
       scale_color_manual(values = c("Other" = "grey80", "CellType" = "red")) +
-      coord_fixed() +
+      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span)) +
       theme_minimal() +
       ggtitle(s) +
       theme(legend.position = "none",

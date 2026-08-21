@@ -83,6 +83,12 @@ cat("\nGenerating spatial plots...\n")
 sample_ids <- levels(seu$sample)
 sample_ids <- sample_ids[sample_ids %in% unique(seu$sample)]
 
+# Compute max span across all samples for uniform unit scale
+all_spatial <- Embeddings(seu, "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 for (gene in c("Cd4", "Cd19")) {
   cat(sprintf("  Spatial: %s\n", gene))
 
@@ -93,7 +99,7 @@ for (gene in c("Cd4", "Cd19")) {
       scale_color_viridis(option = "magma", name = gene) +
       ggtitle(s) +
       NoAxes() +
-      coord_fixed()
+      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span))
   })
 
   p <- wrap_plots(plots, nrow = 1) +
@@ -153,7 +159,7 @@ for (gene in c("Cd3d", "Ptprc", "Cd4")) {
       scale_color_viridis(option = "magma", name = gene) +
       ggtitle(s) +
       NoAxes() +
-      coord_fixed()
+      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span))
   })
 
   p <- wrap_plots(plots, nrow = 1) +
@@ -289,7 +295,7 @@ plots_dc_spatial <- lapply(sample_ids, function(s) {
     scale_color_manual(values = c("Klrk1-" = "grey80", "Klrk1+" = "#D32F2F"),
                        name = NULL) +
     ggtitle(s) +
-    coord_fixed() +
+    coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span)) +
     theme_void() +
     theme(plot.title = element_text(hjust = 0.5, size = 11))
 })
@@ -323,7 +329,7 @@ for (dc_type in DC_TYPES) {
       scale_color_manual(values = c("Klrk1-" = "grey80", "Klrk1+" = "#D32F2F"),
                          name = NULL) +
       ggtitle(s) +
-      coord_fixed() +
+      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span)) +
       theme_void() +
       theme(plot.title = element_text(hjust = 0.5, size = 11))
   })

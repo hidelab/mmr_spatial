@@ -84,8 +84,17 @@ SIG_SYMBOLS <- c("^", "*", "**", "***")
 # Used in: 11_spatial_dirichlet.R
 
 # ------------------------------------------------------------------------------
+# 5b. SPATIAL COORDINATE OPTIONS
+# ------------------------------------------------------------------------------
+CENTER_COORDS <- TRUE  # Center spatial coords per sample (aligns all to origin)
+# Used in: 01_data_import.R, 02_01, plotting scripts
+
+# ------------------------------------------------------------------------------
 # 6. BANKSY / SPATIAL CLUSTERING
 # ------------------------------------------------------------------------------
+RUN_UMAP <- FALSE  # Skip UMAP computation in 02_01 (slow step)
+# Used in: 02_01_reclustering_seurat_banksy_08lambda.R
+
 BANKSY_LAMBDA   <- 0.8    # Spatial context weight
 BANKSY_K_GEOM   <- 30     # Neighborhood size
 BANKSY_NPCS     <- 50     # PCA components to compute
@@ -112,9 +121,9 @@ MERGE_K <- 4       # Number of merged domains
 
 # Domain naming and colors
 DOMAIN_NAMES <- c(
-  "1" = "Mammary Glands",
-  "2" = "Tumor Core",
-  "3" = "Immune Engulfing",
+  "1" = "Immune Engulfing",
+  "2" = "Mammary Glands",
+  "3" = "Tumor Core",
   "4" = "Stroma"
 )
 # Generated in: 02_03 (cluster-to-name mapping)
@@ -231,7 +240,7 @@ PATHWAY_NAME_TRUNC <- 70      # Max characters for pathway names
 # ------------------------------------------------------------------------------
 # 13. VISUALIZATION DEFAULTS
 # ------------------------------------------------------------------------------
-VOLCANO_TOP_N <- 20            # Number of top genes to label in volcano plots
+VOLCANO_TOP_N <- 30            # Number of top genes to label in volcano plots
 # Used in: 03, 04, 05, 06
 
 PANEL_NCOL <- 4                # Default columns for multi-panel plots

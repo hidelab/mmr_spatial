@@ -74,7 +74,7 @@ for (dom in names(all_results)) {
     theme(legend.position = "bottom")
 
   ggsave(file.path(volcano_dir, paste0("volcano_merged_domain_", dom_safe, "_", dom_name, ".pdf")),
-         p, width = 4, height = 3)
+         p, width = 5, height = 4)
 }
 
 # =============================================================================

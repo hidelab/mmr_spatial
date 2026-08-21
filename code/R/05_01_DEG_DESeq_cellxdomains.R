@@ -32,11 +32,9 @@ DOMAIN_COL <- COL_DOMAIN
 
 # Domain names for this analysis (exclude Mammary Glands — only compare Tumor Core,
 # Immune Engulfing, Stroma)
-DOMAIN_NAMES_SUB <- c(
-  "2" = "Tumor_Core",
-  "3" = "Immune_Engulfing",
-  "4" = "Stroma"
-)
+DOMAIN_NAMES_SUB <- DOMAIN_NAMES[DOMAIN_NAMES != "Mammary Glands"]
+DOMAIN_NAMES_SUB <- setNames(gsub(" ", "_", DOMAIN_NAMES_SUB), names(DOMAIN_NAMES_SUB))
+
 
 # Build pairwise comparisons from DOMAIN_COMPARISONS (00_parameters.R)
 COMPARISONS <- lapply(DOMAIN_COMPARISONS, function(pair) {

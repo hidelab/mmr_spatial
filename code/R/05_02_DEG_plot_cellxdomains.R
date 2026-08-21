@@ -161,8 +161,8 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
 
     if (nrow(heatmap_df) >= 3 && ncol(heatmap_df) >= 2) {
       pdf(file.path(OUTPUT_DIR, "DEG_heatmap_top_genes.pdf"),
-          width = max(2, ncol(heatmap_df) * 1.2 + 1),
-          height = max(8, nrow(heatmap_df) * 0.25 + 2))
+          width = max(2, ncol(heatmap_df) * 1.2 + 2),
+          height = max(8, nrow(heatmap_df) * 0.25 + 3))
       pheatmap(as.matrix(heatmap_df),
                color = colorRampPalette(c("#4575B4", "white", "#D73027"))(100),
                breaks = seq(-cap_val, cap_val, length.out = 101),
@@ -213,7 +213,7 @@ for (CELLTYPE in CELLTYPES_OF_INTEREST) {
       theme_publication() +
       theme(legend.position = "bottom")
 
-    ggsave(file.path(ma_dir, paste0("MA_", ct_safe, "_", comp_name, ".pdf")), p_ma, width = 7, height = 5)
+    ggsave(file.path(ma_dir, paste0("MA_", ct_safe, "_", comp_name, ".pdf")), p_ma, width = 7, height = 6)
   }
 
   cat(sprintf("\n  Done plotting: %s\n", CELLTYPE))

@@ -7,7 +7,9 @@
 library(Seurat)
 library(ggplot2)
 library(patchwork)
-library(pheatmap)
+library(ComplexHeatmap)
+library(circlize)
+library(grid)
 
 # Source centralized parameters (defines PROJECT_DIR and all shared constants)
 source("./code/R/00_parameters.R")
@@ -25,6 +27,23 @@ DOMAIN_ORDER_NUM <- names(DOMAIN_NAMES)[match(DOMAIN_ORDER, DOMAIN_NAMES)]
 # --- 1. Load Banksy-clustered Seurat object -----------------------------------
 BANKSY_RDS <- file.path(PROJECT_DIR, "output", "R", "DKO_banksy_seurat.rds")
 seu <- readRDS(BANKSY_RDS)
+
+# Tiny test here
+# {
+# BANKSY_RDS2 <- file.path(PROJECT_DIR, "output", "R_old2", "DKO_banksy_seurat.rds")
+# seu2 <- readRDS(BANKSY_RDS2)
+
+
+
+# domain_labels <- seu@meta.data[[DOMAIN_COL]]
+# table(domain_labels)
+# domain_labels2 <- seu2@meta.data[[DOMAIN_COL]]
+# table(domain_labels2)
+
+
+
+# }
+
 cat("Loaded:", ncol(seu), "cells\n")
 
 # Recode condition and set factor levels
@@ -52,6 +71,7 @@ cat(sprintf("Centroids matrix: %d domains x %d dims\n", nrow(centroids), ncol(ce
 
 # --- 3. Hierarchical clustering on centroids ----------------------------------
 dist_mat <- dist(centroids, method = MERGE_DIST_METHOD)
+set.seed(3)
 hc <- hclust(dist_mat, method = MERGE_LINK_METHOD)
 
 # --- 4. Plot dendrogram -------------------------------------------------------
@@ -73,24 +93,36 @@ ct_prop <- prop.table(ct_table, margin = 1)
 ct_prop_ordered <- ct_prop[hc$labels[hc$order], ]
 
 pdf(file.path(OUTPUT_DIR, "heatmap_domain_celltype_composition.pdf"), width = 12, height = 8)
-pheatmap(ct_prop_ordered,
-         cluster_rows = FALSE,
-         cluster_cols = TRUE,
-         scale = "none",
-         color = colorRampPalette(c("#FFFFFF", "#C8DCF0", "#6BAED6", "#2171B5"))(100),
-         main = "Cell-type composition per Banksy domain (dendrogram order)",
-         fontsize_row = 9, fontsize_col = 9)
+col_fun <- colorRamp2(c(0, 0.5, 1), c("#FFFFFF", "#6BAED6", "#08519C"))
+ht <- Heatmap(ct_prop_ordered,
+              cluster_rows = FALSE,
+              cluster_columns = TRUE,
+              clustering_method_columns = "ward.D2",
+              col = col_fun,
+              name = "Proportion",
+              column_names_rot = 45,
+              column_names_side = "bottom",
+              row_names_side = "left",
+              border = TRUE,
+              column_title = "Cell-type composition per Banksy domain (dendrogram order)")
+draw(ht)
 dev.off()
 
 pdf(file.path(OUTPUT_DIR, "heatmap_domain_celltype_clustered.pdf"), width = 12, height = 8)
-pheatmap(ct_prop,
-         clustering_method = "ward.D2",
-         cluster_rows = TRUE,
-         cluster_cols = TRUE,
-         scale = "none",
-         color = colorRampPalette(c("#FFFFFF", "#C8DCF0", "#6BAED6", "#2171B5"))(100),
-         main = "Cell-type composition per Banksy domain (clustered)",
-         fontsize_row = 9, fontsize_col = 9)
+col_fun <- colorRamp2(c(0, 0.5, 1), c("#FFFFFF", "#6BAED6", "#08519C"))
+ht <- Heatmap(ct_prop,
+              cluster_rows = TRUE,
+              cluster_columns = TRUE,
+              clustering_method_rows = "ward.D2",
+              clustering_method_columns = "ward.D2",
+              col = col_fun,
+              name = "Proportion",
+              column_names_rot = 45,
+              column_names_side = "bottom",
+              row_names_side = "left",
+              border = TRUE,
+              column_title = "Cell-type composition per Banksy domain (clustered)")
+draw(ht)
 dev.off()
 cat("Cell-type composition heatmaps saved.\n")
 
@@ -128,16 +160,25 @@ ct_merged <- table(seu@meta.data[[merged_col]], seu$Tier1_celltype)
 ct_merged_prop <- prop.table(ct_merged, margin = 1)
 ct_merged_prop <- ct_merged_prop[DOMAIN_ORDER_NUM, ]
 
-pdf(file.path(OUTPUT_DIR, "heatmap_merged_domain_celltype.pdf"), width = 8, height = 6)
-pheatmap(ct_merged_prop,
-         cluster_rows = FALSE,
-         cluster_cols = TRUE,
-         clustering_method = "ward.D2",
-         scale = "none",
-         color = colorRampPalette(c("#FFFFFF", "#E8F4F8", "#A8D8E8", "#4A9FBC"))(100),
-         main = paste("Cell-type composition per merged domain (k =", MERGE_K, ")"),
-         fontsize_row = 11, fontsize_col = 9,
-         labels_row = DOMAIN_NAMES[DOMAIN_ORDER_NUM])
+pdf(file.path(OUTPUT_DIR, "heatmap_merged_domain_celltype.pdf"), width = 10, height = 4)
+col_fun <- colorRamp2(c(0, 0.5, 1), c("#FFFFFF", "#A8D8E8", "#4A9FBC"))
+ht <- Heatmap(ct_merged_prop,
+              cluster_rows = FALSE,
+              cluster_columns = TRUE,
+              clustering_method_columns = "ward.D2",
+              col = col_fun,
+              name = "Proportion",
+              row_labels = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
+              column_names_rot = 45,
+              column_names_side = "bottom",
+              row_names_side = "left",
+              border = TRUE,
+              show_column_dend = FALSE,
+              cell_fun = function(j, i, x, y, w, h, fill) {
+                grid.text(sprintf("%.2f", (ct_merged_prop)[i, j]), x, y, gp = gpar(fontsize = 9, col = "black"))
+              },
+              column_title = paste("Cell-type composition per domain"))
+draw(ht)
 dev.off()
 
 write.csv(as.data.frame.matrix(ct_merged_prop),
@@ -149,69 +190,111 @@ ct_merged_inv <- table(seu$Tier1_celltype, seu@meta.data[[merged_col]])
 ct_merged_inv_prop <- prop.table(ct_merged_inv, margin = 1)
 ct_merged_inv_prop <- ct_merged_inv_prop[, DOMAIN_ORDER_NUM]
 
-pdf(file.path(OUTPUT_DIR, "heatmap_celltype_distribution_across_domains.pdf"), width = 8, height = 6)
-pheatmap(t(ct_merged_inv_prop),
-         cluster_rows = TRUE,
-         cluster_cols = FALSE,
-         clustering_method = "ward.D2",
-         scale = "none",
-         color = colorRampPalette(c("#FFFFFF", "#E8F4F8", "#A8D8E8", "#4A9FBC"))(100),
-         main = paste("Distribution of cell types across domains (k =", MERGE_K, ")"),
-         fontsize_row = 11, fontsize_col = 10,
-         labels_row = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
-         display_numbers = TRUE,
-         number_format = "%.2f",
-         number_color = "black",
-         fontsize_number = 9,
-         treeheight_row = 0, 
-         treeheight_col = 0)
+pdf(file.path(OUTPUT_DIR, "heatmap_celltype_distribution_across_domains.pdf"), width = 10, height = 4)
+col_fun <- colorRamp2(c(0, 0.5, 1), c("#FFFFFF", "#A8D8E8", "#4A9FBC"))
+ht <- Heatmap(t(ct_merged_inv_prop),
+              cluster_rows = FALSE,
+              cluster_columns = TRUE,
+              clustering_method_rows = "ward.D2",
+              col = col_fun,
+              name = "Proportion",
+              row_labels = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
+              column_names_rot = 45,
+              column_names_side = "bottom",
+              row_names_side = "left",
+              show_column_dend = FALSE,
+              cell_fun = function(j, i, x, y, w, h, fill) {
+                grid.text(sprintf("%.2f", t(ct_merged_inv_prop)[i, j]), x, y, gp = gpar(fontsize = 9, col = "black"))
+              },
+              border = TRUE,
+              column_title = paste("Distribution of cell types across domains"))
+ht <- draw(ht)
+col_order_idx <- column_order(ht)
+ref_col_order <- colnames(t(ct_merged_inv_prop))[col_order_idx]
 dev.off()
 
 write.csv(as.data.frame.matrix(ct_merged_inv_prop),
           file.path(OUTPUT_DIR, "celltype_distribution_across_domains.csv"))
 
 # --- 8c. Cell-type distribution by condition -----------------------------------
-# Get row ordering from the full dataset heatmap
-temp_heatmap <- pheatmap(ct_merged_inv_prop,
-                         cluster_rows = TRUE, cluster_cols = FALSE,
-                         clustering_method = "ward.D2", silent = TRUE)
-row_order <- rownames(ct_merged_inv_prop)[temp_heatmap$tree_row$order]
-
-all_celltypes <- rownames(ct_merged_inv_prop)
-all_domains <- DOMAIN_ORDER_NUM
-
 for (cond in levels(seu$condition)) {
   idx_cond <- which(seu$condition == cond)
-  celltype_cond <- seu$Tier1_celltype[idx_cond]
-  domain_cond <- seu@meta.data[[merged_col]][idx_cond]
-
-  ct_cond_inv <- table(celltype_cond, domain_cond)
+  ct_cond_inv <- table(seu$Tier1_celltype[idx_cond], seu@meta.data[[merged_col]][idx_cond])
   ct_cond_inv_prop <- prop.table(ct_cond_inv, margin = 1)
 
-  # Pad with zeros to include all cell types and domains
-  ct_cond_full <- matrix(0, nrow = length(all_celltypes), ncol = length(all_domains),
-                         dimnames = list(all_celltypes, all_domains))
-  ct_cond_full[rownames(ct_cond_inv_prop), colnames(ct_cond_inv_prop)] <- ct_cond_inv_prop
-  ct_cond_full <- ct_cond_full[row_order, DOMAIN_ORDER_NUM]
+  # Pad missing domains with zeros
+  all_celltypes <- rownames(ct_cond_inv_prop)
+  ct_cond_full <- matrix(0, nrow = length(all_celltypes), ncol = length(DOMAIN_ORDER_NUM),
+                         dimnames = list(all_celltypes, DOMAIN_ORDER_NUM))
+  shared_doms <- intersect(colnames(ct_cond_inv_prop), DOMAIN_ORDER_NUM)
+  ct_cond_full[, shared_doms] <- ct_cond_inv_prop[, shared_doms]
+  ct_cond_inv_prop <- ct_cond_full
+  ct_cond_inv_prop <- ct_cond_inv_prop[ref_col_order, , drop = FALSE]
 
-  pdf(file.path(OUTPUT_DIR, paste0("heatmap_celltype_distribution_", cond, ".pdf")),
-      width = 8, height = 8)
-  pheatmap(ct_cond_full,
-           cluster_rows = FALSE, cluster_cols = FALSE,
-           scale = "none",
-           color = colorRampPalette(c("#FFFFFF", "#E8F4F8", "#A8D8E8", "#4A9FBC"))(100),
-           main = sprintf("Cell type distribution across domains — %s (k = %d)", cond, MERGE_K),
-           fontsize_row = 11, fontsize_col = 10,
-           labels_col = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
-           display_numbers = TRUE,
-           number_format = "%.2f",
-           number_color = "black",
-           fontsize_number = 9)
+  pdf(file.path(OUTPUT_DIR, paste0("heatmap_celltype_distribution_across_domains_", cond, ".pdf")),
+      width = 10, height = 4)
+  col_fun_cond <- colorRamp2(c(0, 0.5, 1), c("#FFFFFF", "#A8D8E8", "#4A9FBC"))
+  ht_cond <- Heatmap(t(ct_cond_inv_prop),
+                     cluster_rows = FALSE,
+                     cluster_columns = FALSE,
+                     col = col_fun_cond,
+                     name = "Proportion",
+                     row_labels = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
+                     column_names_rot = 45,
+                     column_names_side = "bottom",
+                     row_names_side = "left",
+                     show_column_dend = FALSE,
+                     cell_fun = function(j, i, x, y, w, h, fill) {
+                       grid.text(sprintf("%.2f", t(ct_cond_inv_prop)[i, j]), x, y, gp = gpar(fontsize = 9, col = "black"))
+                     },
+                     border = TRUE,
+                     column_title = paste("Distribution of cell types across domains in ", cond))
+  draw(ht_cond)
   dev.off()
 
-  write.csv(as.data.frame.matrix(ct_cond_full),
-            file.path(OUTPUT_DIR, paste0("celltype_distribution_", cond, ".csv")))
-  cat(sprintf("Saved condition-specific plots for %s\n", cond))
+  write.csv(as.data.frame.matrix(ct_cond_inv_prop),
+            file.path(OUTPUT_DIR, paste0("celltype_distribution_across_domains_", cond, ".csv")))
+  cat(sprintf("Saved condition-specific heatmap for %s\n", cond))
+}
+
+# --- 8d. Cell-type distribution by sample -------------------------------------
+for (samp in levels(seu$sample)) {
+  idx_samp <- which(seu$sample == samp)
+  ct_samp_inv <- table(seu$Tier1_celltype[idx_samp], seu@meta.data[[merged_col]][idx_samp])
+  ct_samp_inv_prop <- prop.table(ct_samp_inv, margin = 1)
+
+  all_celltypes_samp <- rownames(ct_samp_inv_prop)
+  ct_samp_full <- matrix(0, nrow = length(all_celltypes_samp), ncol = length(DOMAIN_ORDER_NUM),
+                         dimnames = list(all_celltypes_samp, DOMAIN_ORDER_NUM))
+  shared_doms_samp <- intersect(colnames(ct_samp_inv_prop), DOMAIN_ORDER_NUM)
+  ct_samp_full[, shared_doms_samp] <- ct_samp_inv_prop[, shared_doms_samp]
+  ct_samp_inv_prop <- ct_samp_full
+  ct_samp_inv_prop <- ct_samp_inv_prop[ref_col_order, , drop = FALSE]
+
+  pdf(file.path(OUTPUT_DIR, paste0("heatmap_celltype_distribution_across_domains_", samp, ".pdf")),
+      width = 10, height = 4)
+  col_fun_samp <- colorRamp2(c(0, 0.5, 1), c("#FFFFFF", "#A8D8E8", "#4A9FBC"))
+  ht_samp <- Heatmap(t(ct_samp_inv_prop),
+                     cluster_rows = FALSE,
+                     cluster_columns = FALSE,
+                     col = col_fun_samp,
+                     name = "Proportion",
+                     row_labels = DOMAIN_NAMES[DOMAIN_ORDER_NUM],
+                     column_names_rot = 45,
+                     column_names_side = "bottom",
+                     row_names_side = "left",
+                     show_column_dend = FALSE,
+                     cell_fun = function(j, i, x, y, w, h, fill) {
+                       grid.text(sprintf("%.2f", t(ct_samp_inv_prop)[i, j]), x, y, gp = gpar(fontsize = 9, col = "black"))
+                     },
+                     border = TRUE,
+                     column_title = paste("Distribution of cell types across domains in", samp))
+  draw(ht_samp)
+  dev.off()
+
+  write.csv(as.data.frame.matrix(ct_samp_inv_prop),
+            file.path(OUTPUT_DIR, paste0("celltype_distribution_across_domains_", samp, ".csv")))
+  cat(sprintf("Saved sample-specific heatmap for %s\n", samp))
 }
 
 # --- 9. Spatial plots of merged domains per sample ----------------------------
@@ -219,19 +302,32 @@ seu@meta.data[[merged_col]] <- factor(seu@meta.data[[merged_col]],
                                        levels = as.character(1:MERGE_K))
 sample_ids <- levels(seu$sample)
 
+
+# Compute max span across all samples for uniform unit scale
+all_spatial <- Embeddings(seu, "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
+
 # Map DOMAIN_COLORS to numeric cluster IDs (factor levels are "1","2",... not names)
 DOMAIN_COLORS_NUM <- setNames(DOMAIN_COLORS[DOMAIN_NAMES[as.character(1:MERGE_K)]],
                               as.character(1:MERGE_K))
 
 plots_spatial <- lapply(sample_ids, function(s) {
   sub <- subset(seu, subset = sample == s)
-  DimPlot(sub, reduction = "spatial", group.by = merged_col, pt.size = 1,
-          cols = DOMAIN_COLORS_NUM, shuffle = TRUE,
-          raster = TRUE, raster.dpi = c(300, 300)) +
+  p <- DimPlot(sub, reduction = "spatial", group.by = merged_col, pt.size = 1,
+               cols = DOMAIN_COLORS_NUM, shuffle = TRUE,
+               raster = TRUE, raster.dpi = c(300, 300)) +
     ggtitle(s) +
     NoAxes() +
-    NoLegend() +
-    coord_fixed()
+    NoLegend()
+  if (CENTER_COORDS) {
+    p <- p + coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span))
+  } else {
+    p <- p + coord_fixed()
+  }
+  p
 })
 
 p_spatial <- wrap_plots(plots_spatial, nrow = 1) +
@@ -243,26 +339,26 @@ ggsave(file.path(OUTPUT_DIR, "spatial_merged_domains.pdf"),
 ggsave(file.path(OUTPUT_DIR, "spatial_merged_domains.png"),
        p_spatial, width = 4 * length(sample_ids), height = 5)
 
-# UMAP view of merged domains vs cell type
-p_dom_umap <- DimPlot(seu, reduction = "umap_banksy", group.by = merged_col,
-                      pt.size = 1, cols = DOMAIN_COLORS_NUM, shuffle = TRUE,
-                      raster = TRUE, raster.dpi = c(300, 300)) +
-  ggtitle(paste("Merged Domains (k =", MERGE_K, ")")) +
-  NoAxes() +
-  guides(color = guide_legend(override.aes = list(size = 3)))
+# # UMAP view of merged domains vs cell type
+# p_dom_umap <- DimPlot(seu, reduction = "umap_banksy", group.by = merged_col,
+#                       pt.size = 1, cols = DOMAIN_COLORS_NUM, shuffle = TRUE,
+#                       raster = TRUE, raster.dpi = c(300, 300)) +
+#   ggtitle(paste("Merged Domains (k =", MERGE_K, ")")) +
+#   NoAxes() +
+#   guides(color = guide_legend(override.aes = list(size = 3)))
 
-p_ct_umap <- DimPlot(seu, reduction = "umap_banksy", group.by = "Tier1_celltype",
-                     pt.size = 1, cols = TIER1_COLORS, shuffle = TRUE,
-                     raster = TRUE, raster.dpi = c(300, 300)) +
-  ggtitle("Cell Type") +
-  NoAxes() +
-  guides(color = guide_legend(override.aes = list(size = 3), ncol = 1))
+# p_ct_umap <- DimPlot(seu, reduction = "umap_banksy", group.by = "Tier1_celltype",
+#                      pt.size = 1, cols = TIER1_COLORS, shuffle = TRUE,
+#                      raster = TRUE, raster.dpi = c(300, 300)) +
+#   ggtitle("Cell Type") +
+#   NoAxes() +
+#   guides(color = guide_legend(override.aes = list(size = 3), ncol = 1))
 
-ggsave(file.path(OUTPUT_DIR, "umap_merged_domains_vs_celltype.pdf"),
-       p_dom_umap + p_ct_umap, width = 16, height = 6)
-ggsave(file.path(OUTPUT_DIR, "umap_merged_domains_vs_celltype.png"),
-       p_dom_umap + p_ct_umap, width = 16, height = 6)
-cat("Spatial and UMAP plots saved.\n")
+# ggsave(file.path(OUTPUT_DIR, "umap_merged_domains_vs_celltype.pdf"),
+#        p_dom_umap + p_ct_umap, width = 16, height = 6)
+# ggsave(file.path(OUTPUT_DIR, "umap_merged_domains_vs_celltype.png"),
+#        p_dom_umap + p_ct_umap, width = 16, height = 6)
+# cat("Spatial and UMAP plots saved.\n")
 
 # --- 10. Assign domain names ---------------------------------------------------
 seu@meta.data[["banksy_domain_name"]] <- DOMAIN_NAMES[as.character(seu@meta.data[[merged_col]])]

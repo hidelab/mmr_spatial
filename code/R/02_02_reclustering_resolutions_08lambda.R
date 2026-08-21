@@ -79,6 +79,12 @@ cat("UMAP resolution sweep saved.\n")
 # --- 5. Spatial plots for each resolution ----------------------------------------
 sample_ids <- levels(seu$sample)
 
+# Compute max span across all samples for uniform unit scale
+all_spatial <- Embeddings(seu, "spatial")
+max_x_span <- max(tapply(all_spatial[, 1], seu$sample, function(x) diff(range(x))))
+max_y_span <- max(tapply(all_spatial[, 2], seu$sample, function(x) diff(range(x))))
+half_span <- max(max_x_span, max_y_span) / 2 * 1.05
+
 for (res in all_res) {
   col_name <- paste0("banksy_res_", res)
 
@@ -89,7 +95,7 @@ for (res in all_res) {
                      cluster = sub@meta.data[[col_name]])
     ggplot(df, aes(x, y, color = cluster)) +
       geom_point(size = 0.3) +
-      coord_fixed() +
+      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span)) +
       ggtitle(s) +
       theme_void() +
       theme(plot.title = element_text(hjust = 0.5, face = "bold"),

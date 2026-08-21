@@ -7,8 +7,8 @@ Newest entries appear at the top.
 
 ## 2026-07-27
 
-### Fixed
-- `code/R/02_03_merge_domains_08lambda.R`: Fixed readability of heatmap text by replacing dark navy-blue color palette (`"white", "steelblue", "navy"`) with a lighter palette (`"#FFFFFF", "#E8F4F8", "#A8D8E8", "#4A9FBC"`) in three heatmaps (merged domain cell-type composition, cell-type distribution across domains, and per-condition variants). The original palette made black text on dark-blue cells nearly invisible; the new palette maintains visual gradient while keeping text legible.
+### Changed
+- `code/R/02_03_merge_domains_08lambda.R`: Replaced `pheatmap` with `ComplexHeatmap` for all five heatmaps to enable proper 45° column-name rotation (`column_names_rot = 45`), improving readability. Unified color function using `colorRamp2(c(0, 0.5, 1), c("#FFFFFF", "#A8D8E8", "#4A9FBC"))` for consistency and better contrast. Added `cell_fun` with `grid.text()` to display cell values on numeric heatmaps. Replaced `pheatmap` library import with `ComplexHeatmap`, `circlize`, and `grid`.
 
 ### Added
 - `code/R/11_01_spatial_dirichlet.R`: Added a third Dirichlet regression analysis testing whether **spatial domain** composition (Banksy merged domains via `COL_DOMAIN`, mapped to `DOMAIN_NAMES`/`DOMAIN_ORDER`) differs between DKO and WT. Mirrors the existing immune and epithelial/fibroblast blocks: builds a sample×domain count table over all QC-passing cells, fits `DirichReg(AL ~ condition)` with an LRT vs the null, and emits results CSVs plus stacked-bar, collapsed-bar, boxplot-with-significance, and dot-plot figures (`dirichlet_DKOvsWT_domains*`, `domain_*`). Updated the header docstring and end-of-run summary accordingly.
