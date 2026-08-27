@@ -24,7 +24,8 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 # =============================================================================
 # Parameters (modifiable)
 # =============================================================================
-KDE_BANDWIDTH <- NULL
+KDE_BANDWIDTH <- NULL   # NULL = estimate per sample via bandwidth.nrd(); else c(hx, hy)
+KDE_BW_SCALE  <- 2.0    # multiplier on the KDE bandwidth: >1 spreads the field further, <1 sharpens it
 TARGET_CELLTYPE <- "Tumor"
 N_BINS <- 10
 TOP_N_GENES <- 50
@@ -69,13 +70,15 @@ for (s in levels(samples)) {
 
   tumor_coords <- coords_s[tumor_idx_s, , drop = FALSE]
 
-  # Estimate bandwidth from tumor cells (or use provided)
+  # Estimate bandwidth from tumor cells (or use provided), then scale it.
+  # Larger KDE_BW_SCALE widens the Gaussian kernels -> smoother, more spread-out field.
   bw <- KDE_BANDWIDTH
   if (is.null(bw)) {
     bw_est <- bandwidth.nrd(tumor_coords[, 1])
     bw_est2 <- bandwidth.nrd(tumor_coords[, 2])
     bw <- c(bw_est, bw_est2)
   }
+  bw <- bw * KDE_BW_SCALE
 
   # Build KDE on a grid from tumor cell positions
   x_range <- range(coords_s[, 1])
@@ -127,8 +130,8 @@ for (s in levels(samples)) {
   }
 
   tumor_density[idx] <- cell_density
-  cat(sprintf("  %s: %d cells, %d tumor, bw = (%.1f, %.1f)\n",
-              s, length(idx), length(tumor_idx_s), bw[1], bw[2]))
+  cat(sprintf("  %s: %d cells, %d tumor, bw = (%.1f, %.1f) [scale=%.1f]\n",
+              s, length(idx), length(tumor_idx_s), bw[1], bw[2], KDE_BW_SCALE))
 }
 
 seu$tumor_density_kde <- tumor_density

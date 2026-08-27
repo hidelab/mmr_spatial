@@ -182,7 +182,7 @@ DC_TYPES <- c("cDC1", "pDC", "DC (Ccr7+)")
 # 9. GENES OF INTEREST
 # ------------------------------------------------------------------------------
 GENES_CYTOTOXICITY <- c("Klrk1", "Gzmb", "Prf1", "Nkg7")
-GENES_CHEMOKINE    <- c("Cxcl16", "Cxcr6")
+GENES_CHEMOKINE    <- c("Cxcl16", "Cxcr6","Mlh1","Msh2")
 GENES_CYTOKINE     <- c("Il15", "Osm", "Osmr", "Il24")
 GENES_IMMUNE       <- c("Cd8a", "Cd4", "Foxp3", "Cd3d", "Ptprc")
 GENES_MACROPHAGE   <- c("Mrc1", "Cd163", "Nos2", "Arg1")
