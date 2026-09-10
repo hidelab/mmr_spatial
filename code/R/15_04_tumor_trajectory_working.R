@@ -54,39 +54,97 @@ KDE_GRID_N    <- 200          # KDE grid resolution
 KNN_K         <- 30           # k for "knn" / "diffusion"
 DIFFUSION_VARIANT <- "heat"   # "implicit" | "heat" | "ppr" (when SCORE_METHOD="diffusion")
 DIFFUSION_HEAT_STEPS <- 20    # backward-Euler steps for the "heat" variant
+DIFFUSION_HEAT_ALPHA <- 2    # per-step timestep alpha (total diffusion time = steps*alpha)
+# Local-tumor-fraction score (reviewer point #6): compute (K x)/(K 1), a
+# kernel-weighted local tumor fraction that is natively in [0,1] and comparable
+# ACROSS samples, then SKIP the per-sample min-max normalization (which otherwise
+# stretches a tumor-poor mouse's ceiling to 1). TRUE is the corrected default.
+DIFFUSION_LOCAL_FRACTION <- TRUE
 
 TARGET_CELLTYPE <- "Tumor"
 
 # --- Binning / genes ---------------------------------------------------------
 N_BINS            <- 10
 MIN_CELLS_PER_BIN <- 5
+# --- Common support (reviewer follow-up #1) ----------------------------------
+# The fs difference smooth must be estimated from DATA in both conditions, not
+# extrapolated by shrinkage where one condition has no cells. Because DKO tumor
+# burden is ~0.47x WT and the tumor-poor DKO samples top out at low score, the
+# upper score bins are WT-dominated / WT-only. COMMON_SUPPORT keeps only bins where
+# BOTH conditions contribute >= MIN_SAMPLES_PER_COND_PER_BIN distinct samples (each
+# already >= MIN_CELLS_PER_BIN cells), truncating the trajectory to the score range
+# with genuine 2-vs-2+ replicated support. The retained score range is reported.
+COMMON_SUPPORT               <- TRUE
+MIN_SAMPLES_PER_COND_PER_BIN <- 2
+# Pseudobulk GAM x-axis (reviewer #2). "score" = REAL mean local tumor fraction of
+# each group -> fitted curves in interpretable score units, keeps within-bin
+# variation (corrected default). "decile" = the previous evenly-spaced bin-index
+# coordinate ((bin-0.5)/N_BINS) -> equal plot width per decile, but throws away the
+# comparable score. Both are monotone maps common to both conditions, so neither
+# biases the condition test; the choice is interpretability vs even spacing.
+PB_SCORE_AXIS                <- "score"   # "score" | "decile"
 GENE_SELECTION    <- "binned_variance"  # "binned_variance" | "spearman" | "svg"
-TOP_N_GENES       <- 200
+TOP_N_GENES       <- 80
+# --- Test set vs plot set (reviewer point #5) --------------------------------
+# The GAM condition test runs on a BASELINE-EXPRESSION filtered gene set, using the
+# SAME gene-level filters as the DESeq2 DE scripts (00_parameters.R): a gene is
+# tested if it is detected in >= MIN_GENE_EXPR_FRAC of this cell type's cells AND has
+# >= MIN_COUNTS_PER_SAMPLE counts in >= MIN_SAMPLES_EXPRESSED samples. This filter is
+# independent of the condition x score interaction under the null, so BH over the
+# whole passing set uses the correct m (not confounded with the test). The
+# score-dependent GENE_SELECTION (binned_variance top TOP_N_GENES) is used ONLY to
+# pick genes shown in the reference/wave heatmaps, never to define the tested set.
 # SVG_GENES: placeholder for a future top-200 spatially-variable-gene set.
 # When GENE_SELECTION == "svg", genes are taken from this vector (intersected
 # with the cell type's expressed genes). Populate later from an SVG analysis.
 SVG_GENES         <- NULL
 
 # --- GAM models --------------------------------------------------------------
-# Any subset of: "fs" (factor-smooth random effect), "ranef" (random intercept),
-# "pseudobulk" (sample x bin weighted GAM). Each is fit + saved separately.
-# "pseudobulk" is the primary spec and MUST be listed first when combined with
-# the single-cell models, because its p_shape ranking is used to pick genes for
-# any model NOT in FULL_GENE_MODELS.
-GAM_MODELS <- c("pseudobulk", "ranef")
-GAM_K      <- 4
-# Models fit on the FULL top_genes set (like pseudobulk). Any GAM model in
-# GAM_MODELS but NOT here is restricted to the top N_GENES_OTHER_MODELS pseudobulk
-# genes (cheap cross-check). "ranef" is kept as a full-gene secondary spec.
-FULL_GENE_MODELS     <- c("pseudobulk", "ranef")
+# Any subset of:
+#   "pseudobulk"    — sample x bin weighted GAM, random INTERCEPT s(sample,bs="re").
+#   "pseudobulk_fs" — same pseudobulk data, but a factor-SMOOTH random effect
+#                     s(score,sample,bs="fs") that gives each sample its own
+#                     penalized curve (random intercept AND shape). This is the
+#                     statistically correct spec for the p_shape (trajectory-shape)
+#                     test: between-mouse shape heterogeneity goes into the error
+#                     term instead of being attributed to condition. The fs term
+#                     subsumes the random intercept, so no separate re term. Cheap
+#                     on the ~140 pseudobulk points. Expect FAR fewer significant
+#                     genes than "pseudobulk"/"ranef" — that drop is the correct
+#                     answer given the true n = 3 WT + 4 DKO, not a failure.
+#   "ranef"         — single-cell GAM, random INTERCEPT s(sample,bs="re").
+#   "fs"            — single-cell factor-smooth (slow; the pseudobulk_fs variant
+#                     is preferred for the shape test).
+# Each is fit + saved separately. "pseudobulk" MUST be listed first when combined
+# with non-FULL_GENE_MODELS, because its p_shape ranking picks genes for them.
+# NOTE on interpretation: pseudobulk/ranef (random intercept only) are
+# ANTICONSERVATIVE for p_shape (the by-condition smooth is tested against bin-level
+# residuals, not the 7 mice) — treat them as exploratory rankings. pseudobulk_fs is
+# the defensible shape test; p_level (level offset) is the trustworthy
+# between-mouse level test in all specs.
+GAM_MODELS <- c("pseudobulk", "pseudobulk_fs")
+GAM_K      <- 5
+# Basis dimension for the per-sample factor-smooth s(score, sample, bs="fs"). MUST be
+# kept small: with only ~9 pseudobulk points per sample, a high-k fs smooth
+# near-saturates the model, the REML smoothing-parameter surface becomes multimodal,
+# and the fitted p_shape becomes ROW-ORDER DEPENDENT (see notes.md, 2026-09-10). k=3
+# is well-determined here and makes the fit exactly order-invariant. The trajectory
+# smooths s(score)/by-smooth stay at GAM_K.
+FS_K       <- 3
+# Models fit on the FULL test_genes set (all expression-filtered genes). Any GAM
+# model in GAM_MODELS but NOT here is restricted to the top N_GENES_OTHER_MODELS
+# pseudobulk genes (cheap cross-check).
+FULL_GENE_MODELS     <- c("pseudobulk", "ranef", "pseudobulk_fs")
 N_GENES_OTHER_MODELS <- 10   # gene budget for non-full models (e.g. "fs")
 
 # --- Condition-test visualization -------------------------------------------
-# Per-gene GAM scatter+spline PDFs. Hard to read at 100 genes as a *summary* (the
-# significant-trajectory heatmap is the main view), but useful for inspecting a
-# single model. This is a vector of model names for which to emit the per-gene
-# gam_<gene>.pdf splines; character(0) disables them entirely.
-PLOT_INDIVIDUAL_GAMS <- c("ranef")
+# Per-gene GAM scatter+spline PDFs. A vector of model names for which to emit the
+# per-gene gam_<gene>.pdf splines; character(0) disables them entirely. To keep the
+# folder readable, PDFs are emitted ONLY for genes passing BH-FDR < SIG_FDR (shape
+# or level) for that model — the same set shown in the significant-trajectory
+# heatmap — not for every tested gene. Must name models that are in GAM_MODELS
+# (default: the primary pseudobulk_fs spec).
+PLOT_INDIVIDUAL_GAMS <- c("pseudobulk_fs")
 # BH-FDR cutoff for a gene to enter the significant-trajectory heatmap. A gene is
 # kept if fdr_shape < SIG_FDR OR fdr_level < SIG_FDR. Set to 0.1 (was 0.05) to
 # admit borderline trajectory-shape genes (e.g. Klrk1, Cxcr6) for visualization;
@@ -109,9 +167,92 @@ CELLTYPES_TRAJECTORY <- c("CD8+ T")
 APPLY_QC <- FALSE
 
 stopifnot(SCORE_METHOD %in% c("kde", "knn", "diffusion"))
-stopifnot(all(GAM_MODELS %in% c("fs", "ranef", "pseudobulk")))
+stopifnot(all(GAM_MODELS %in% c("fs", "ranef", "pseudobulk", "pseudobulk_fs")))
 stopifnot(GENE_SELECTION %in% c("binned_variance", "spearman", "svg"))
 stopifnot(HEATMAP_ROW_ORDER %in% c("cluster", "shape"))
+stopifnot(PB_SCORE_AXIS %in% c("score", "decile"))
+
+# =============================================================================
+# Parameter report (written FIRST, before any heavy computation)
+# =============================================================================
+# Snapshot every run parameter into OUTPUT_DIR so each result folder is
+# self-documenting and reproducible. Emitted before the readRDS / scoring / GAM
+# chunks so that even a crashed or interrupted run leaves a record of exactly
+# which settings produced (or attempted) the outputs. Writes both a machine-
+# readable run_parameters.csv (group, parameter, value) and a human-readable
+# run_parameters.txt.
+write_param_report <- function(dir) {
+  fmt  <- function(x) paste(as.character(x), collapse = ", ")
+  grp  <- function(group, ...) {
+    kv <- list(...)
+    data.frame(group = group, parameter = names(kv),
+               value = vapply(kv, fmt, character(1)),
+               row.names = NULL, stringsAsFactors = FALSE)
+  }
+  pkgver <- function(p) if (requireNamespace(p, quietly = TRUE))
+                          as.character(utils::packageVersion(p)) else "NA"
+  rep_df <- rbind(
+    grp("run",
+        script     = "code/R/15_04_tumor_trajectory_working.R",
+        run_time   = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+        host       = as.character(Sys.info()[["nodename"]]),
+        R_version  = R.version.string,
+        mgcv       = pkgver("mgcv"),
+        Seurat     = pkgver("Seurat"),
+        ComplexHeatmap = pkgver("ComplexHeatmap"),
+        N_THREADS  = N_THREADS,
+        input_rds  = "output/R/DKO_banksy_merged.rds"),
+    grp("tumor_score",
+        SCORE_METHOD = SCORE_METHOD, DIFFUSION_VARIANT = DIFFUSION_VARIANT,
+        DIFFUSION_HEAT_STEPS = DIFFUSION_HEAT_STEPS,
+        DIFFUSION_HEAT_ALPHA = DIFFUSION_HEAT_ALPHA,
+        DIFFUSION_LOCAL_FRACTION = DIFFUSION_LOCAL_FRACTION,
+        KNN_K = KNN_K, KDE_BW_SCALE = KDE_BW_SCALE, KDE_GRID_N = KDE_GRID_N,
+        TARGET_CELLTYPE = TARGET_CELLTYPE),
+    grp("binning_support",
+        N_BINS = N_BINS, MIN_CELLS_PER_BIN = MIN_CELLS_PER_BIN,
+        COMMON_SUPPORT = COMMON_SUPPORT,
+        MIN_SAMPLES_PER_COND_PER_BIN = MIN_SAMPLES_PER_COND_PER_BIN,
+        PB_SCORE_AXIS = PB_SCORE_AXIS),
+    grp("genes",
+        GENE_SELECTION = GENE_SELECTION, TOP_N_GENES = TOP_N_GENES,
+        MIN_GENE_EXPR_FRAC = MIN_GENE_EXPR_FRAC,
+        MIN_COUNTS_PER_SAMPLE = MIN_COUNTS_PER_SAMPLE,
+        MIN_SAMPLES_EXPRESSED = MIN_SAMPLES_EXPRESSED),
+    grp("gam_models",
+        GAM_MODELS = GAM_MODELS, GAM_K = GAM_K, FS_K = FS_K,
+        FULL_GENE_MODELS = FULL_GENE_MODELS,
+        N_GENES_OTHER_MODELS = N_GENES_OTHER_MODELS),
+    grp("condition_test_viz",
+        PLOT_INDIVIDUAL_GAMS = if (length(PLOT_INDIVIDUAL_GAMS))
+                                 PLOT_INDIVIDUAL_GAMS else "(none)",
+        SIG_FDR = SIG_FDR, HEATMAP_ROW_ORDER = HEATMAP_ROW_ORDER),
+    grp("qc",
+        APPLY_QC = APPLY_QC, MIN_TOTAL_COUNTS = MIN_TOTAL_COUNTS,
+        MIN_GENES_DETECTED = MIN_GENES_DETECTED),
+    grp("design",
+        REFERENCE_CONDITION = REFERENCE_CONDITION,
+        TEST_CONDITION = TEST_CONDITION, WT_SAMPLES = WT_SAMPLES,
+        CELLTYPES_TRAJECTORY = CELLTYPES_TRAJECTORY)
+  )
+  write.csv(rep_df, file.path(dir, "run_parameters.csv"), row.names = FALSE)
+  con <- file(file.path(dir, "run_parameters.txt"), open = "wt")
+  writeLines(c(strrep("=", 78),
+               "15_04 tumor-trajectory working — run parameters",
+               strrep("=", 78)), con)
+  for (g in unique(rep_df$group)) {
+    writeLines(sprintf("\n-- %s --", g), con)
+    sub <- rep_df[rep_df$group == g, ]
+    writeLines(sprintf("  %-30s = %s", sub$parameter, sub$value), con)
+  }
+  writeLines(c("", strrep("=", 78)), con)
+  close(con)
+  invisible(rep_df)
+}
+param_report <- write_param_report(OUTPUT_DIR)
+cat(sprintf("Wrote parameter report -> %s\n",
+            file.path(OUTPUT_DIR, "run_parameters.{txt,csv}")))
+print(param_report, row.names = FALSE)
 
 # =============================================================================
 # Load data
@@ -157,7 +298,12 @@ tumor_score <- switch(SCORE_METHOD,
                             k = KNN_K),
   diffusion = compute_tumor_score(all_coords, is_tumor, samples, method = "diffusion",
                                   diffusion_method = DIFFUSION_VARIANT, k = KNN_K,
-                                  heat_steps = DIFFUSION_HEAT_STEPS)
+                                  heat_steps = DIFFUSION_HEAT_STEPS,
+                                  local_fraction = DIFFUSION_LOCAL_FRACTION,
+                                  # Local-fraction score is already comparable [0,1];
+                                  # skip per-sample min-max (reviewer point #6).
+                                  normalize = !DIFFUSION_LOCAL_FRACTION,
+                                  alpha = DIFFUSION_HEAT_ALPHA)
 )
 seu$tumor_score <- tumor_score
 cat("Tumor score computed.\n")
@@ -169,6 +315,10 @@ cat("Tumor score computed.\n")
 # squished against the left edge — equal plot width per decile of cells.
 SCORE_LAB   <- sprintf("Tumor Proximity Score (%s)", toupper(SCORE_METHOD))
 TRAJ_X_LAB  <- sprintf("Tumor proximity (decile of %s score)", toupper(SCORE_METHOD))
+# X-label for the pseudobulk GAM curves, matching PB_SCORE_AXIS.
+GAM_X_LAB   <- if (PB_SCORE_AXIS == "score") {
+                 sprintf("Tumor proximity (%s local tumor fraction)", toupper(SCORE_METHOD))
+               } else TRAJ_X_LAB
 
 # =============================================================================
 # Helpers
@@ -238,7 +388,9 @@ select_genes <- function(expr_mat, score_vec, method = GENE_SELECTION,
 
 # --- Pseudobulk (sample x bin) ----------------------------------------------
 make_pseudobulk <- function(expr_mat, score_vec, sample_vec, condition_vec,
-                            n_bins = N_BINS, min_cells = MIN_CELLS_PER_BIN) {
+                            n_bins = N_BINS, min_cells = MIN_CELLS_PER_BIN,
+                            common_support = COMMON_SUPPORT,
+                            min_samp_per_cond = MIN_SAMPLES_PER_COND_PER_BIN) {
   b <- make_bins(score_vec, n_bins)
   bins <- as.integer(b$bins)
   groups <- paste(sample_vec, bins, sep = "__")
@@ -254,14 +406,46 @@ make_pseudobulk <- function(expr_mat, score_vec, sample_vec, condition_vec,
     pb_meta[[g]] <- data.frame(
       group = g, sample = parts[1],
       condition = as.character(condition_vec[cell_idx[1]]),
-      bin = bin_id, score = b$midpoints[bin_id],
+      bin = bin_id,
+      # REAL score of the group = mean local tumor fraction of its cells (reviewer
+      # #2), NOT the bin index — so fitted curves are in interpretable score units
+      # and within-bin score variation is retained.
+      score = mean(score_vec[cell_idx]),
       n_cells = length(cell_idx), stringsAsFactors = FALSE)
   }
   if (length(pb_list) == 0) return(NULL)
   meta <- bind_rows(pb_meta)
   meta$condition <- factor(meta$condition,
                            levels = c(REFERENCE_CONDITION, TEST_CONDITION))
-  list(expr = do.call(cbind, pb_list), meta = meta)
+
+  # --- Common-support filter (reviewer #1) -----------------------------------
+  # Keep only bins where BOTH conditions contribute >= min_samp_per_cond distinct
+  # samples (each group already has >= min_cells cells). This confines the fs
+  # difference smooth to the score range with real 2-vs-2+ data in both conditions
+  # instead of letting it extrapolate over WT-only upper bins.
+  support <- NULL
+  if (common_support) {
+    per_bin <- meta %>%
+      group_by(bin) %>%
+      summarise(n_wt  = dplyr::n_distinct(sample[condition == REFERENCE_CONDITION]),
+                n_dko = dplyr::n_distinct(sample[condition == TEST_CONDITION]),
+                .groups = "drop")
+    keep_bins <- sort(per_bin$bin[per_bin$n_wt  >= min_samp_per_cond &
+                                  per_bin$n_dko >= min_samp_per_cond])
+    support <- list(per_bin = per_bin, keep_bins = keep_bins)
+    meta <- meta[meta$bin %in% keep_bins, ]
+    if (nrow(meta) < 4) return(NULL)     # too little common support to fit
+    pb_list <- pb_list[meta$group]       # realign expr columns to filtered meta
+  }
+
+  # Canonical row order (sample, then bin) so the fit is deterministic and matches
+  # any other script building the same pseudobulk (belt-and-suspenders on top of the
+  # order-stable fs_k; see notes.md 2026-09-10).
+  ord <- order(meta$sample, meta$bin)
+  meta <- meta[ord, ]
+  pb_list <- pb_list[meta$group]
+
+  list(expr = do.call(cbind, pb_list), meta = meta, support = support)
 }
 
 # --- GAM fitting (model-specific) -------------------------------------------
@@ -280,7 +464,7 @@ make_pseudobulk <- function(expr_mat, score_vec, sample_vec, condition_vec,
 #               the trajectory question; the novel result.
 #   * p_level = does the OVERALL level differ (parametric offset) — already
 #               captured by standard bulk DKO-vs-WT DE.
-fit_trajectory_gam <- function(df, model, gam_k = GAM_K) {
+fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
   df$condition <- droplevels(factor(df$condition,
                                     levels = c(REFERENCE_CONDITION, TEST_CONDITION)))
   df$sample <- droplevels(factor(df$sample))
@@ -296,15 +480,27 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K) {
     if (nlevels(df$sample) < 2) return(list(ok = FALSE))
     # Sample random intercept so the ~n pseudobulk points (from only 7 samples)
     # are not treated as independent replicates -> guards against residual
-    # pseudoreplication at the sample level.
+    # pseudoreplication at the sample level (LEVEL only, not shape).
     form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
                    cond_ord + s(sample, bs = "re")
     excl <- "s(sample)"
     wcol <- df$weight
+  } else if (model == "pseudobulk_fs") {
+    if (nlevels(df$sample) < 2) return(list(ok = FALSE))
+    # Pseudobulk data + factor-SMOOTH random effect: each sample gets its own
+    # penalized curve, so between-mouse trajectory-SHAPE heterogeneity is in the
+    # error term. This is the correct null for the p_shape test. The fs term
+    # subsumes the per-sample intercept, so no separate s(sample, bs="re").
+    # Weighted by n_cells like the standard pseudobulk fit. fs term uses the smaller
+    # fs_k (not gam_k) to keep the per-sample smooth well-determined -> order-stable.
+    form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
+                   cond_ord + s(score, sample, bs = "fs", k = fs_k)
+    excl <- "s(score,sample)"
+    wcol <- df$weight
   } else if (model == "fs") {
     if (nlevels(df$sample) < 2) return(list(ok = FALSE))
     form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
-                   cond_ord + s(score, sample, bs = "fs", k = gam_k)
+                   cond_ord + s(score, sample, bs = "fs", k = fs_k)
     excl <- "s(score,sample)"
     wcol <- NULL
   } else if (model == "ranef") {
@@ -326,9 +522,20 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K) {
   diff_row <- s_rows[grepl(":cond_ord", s_rows, fixed = TRUE)]
   p_shape  <- if (length(diff_row)) sm$s.table[diff_row[1], "p-value"] else NA_real_
   # Parametric offset row: ordered factor -> "cond_ord.L" (linear contrast).
+  # Grep the p-value column rather than hard-coding "Pr(>|t|)": under a non-Gaussian
+  # family (e.g. nb()) mgcv reports "Pr(>|z|)", so a fixed name would silently
+  # return NA. The p-value is always the last p.table column matching "^Pr(".
   p_rows   <- rownames(sm$p.table)
   lev_row  <- p_rows[grepl("cond_ord", p_rows, fixed = TRUE)]
-  p_level  <- if (length(lev_row)) sm$p.table[lev_row[1], "Pr(>|t|)"] else NA_real_
+  pcol     <- grep("^Pr\\(", colnames(sm$p.table))
+  p_level  <- if (length(lev_row) && length(pcol))
+                sm$p.table[lev_row[1], pcol[1]] else NA_real_
+
+  # mgcv can underflow an extreme smooth/parametric p-value to exactly 0. Floor at
+  # machine precision so the CSV / BH-FDR report a representable value (~2.2e-16)
+  # rather than a literal 0 (which is not a valid p-value).
+  if (!is.na(p_shape)) p_shape <- max(p_shape, .Machine$double.eps)
+  if (!is.na(p_level)) p_level <- max(p_level, .Machine$double.eps)
 
   # Population-level prediction grid (random effects excluded)
   newd <- expand.grid(
@@ -419,10 +626,31 @@ for (ct in CELLTYPES_TRAJECTORY) {
               sum(ct_condition == TEST_CONDITION)))
 
   # --- Gene selection --------------------------------------------------------
-  top_genes <- select_genes(expr_mat, ct_score)
-  if (length(top_genes) < 5) {
-    cat(sprintf("  Skipping %s: too few genes selected\n", ct)); next
+  # TWO distinct sets (reviewer point #5):
+  #   test_genes — baseline-expression filter, IDENTICAL to the DESeq2 DE scripts
+  #                (00_parameters.R): detected in >= MIN_GENE_EXPR_FRAC of this cell
+  #                type's cells AND >= MIN_COUNTS_PER_SAMPLE counts in
+  #                >= MIN_SAMPLES_EXPRESSED samples. Independent of the condition x
+  #                score interaction, so BH over this whole set uses the correct m.
+  #   plot_genes — score-dependent GENE_SELECTION (binned_variance top-N). Used ONLY
+  #                for the reference/wave heatmaps, never to define the tested set.
+  counts_ct <- GetAssayData(seu, assay = "RNA", layer = "counts")[, ct_idx]
+  det_frac  <- Matrix::rowSums(counts_ct > 0) / length(ct_idx)
+  samp_sum  <- vapply(levels(ct_sample), function(s)
+                 Matrix::rowSums(counts_ct[, ct_sample == s, drop = FALSE]),
+                 numeric(nrow(counts_ct)))               # genes x samples (summed counts)
+  n_samp_det <- rowSums(samp_sum >= MIN_COUNTS_PER_SAMPLE)
+  test_genes <- rownames(counts_ct)[det_frac >= MIN_GENE_EXPR_FRAC &
+                                    n_samp_det >= MIN_SAMPLES_EXPRESSED]
+  test_genes <- intersect(test_genes, rownames(expr_mat))
+  plot_genes <- select_genes(expr_mat, ct_score)
+  if (length(test_genes) < 5 || length(plot_genes) < 5) {
+    cat(sprintf("  Skipping %s: too few genes (test %d, plot %d)\n",
+                ct, length(test_genes), length(plot_genes))); next
   }
+  cat(sprintf("  Genes: %d tested (>=%.0f%% cells & >=%d counts in >=%d samples), %d shown in heatmaps\n",
+              length(test_genes), MIN_GENE_EXPR_FRAC * 100, MIN_COUNTS_PER_SAMPLE,
+              MIN_SAMPLES_EXPRESSED, length(plot_genes)))
 
   # ---------------------------------------------------------------------------
   # Binning-quality diagnostics
@@ -477,13 +705,13 @@ for (ct in CELLTYPES_TRAJECTORY) {
   # ---------------------------------------------------------------------------
   # Binned heatmaps (combined + per-condition) — reference view
   # ---------------------------------------------------------------------------
-  be_all <- binned_expression(expr_mat[top_genes, , drop = FALSE], bininfo$bins)
+  be_all <- binned_expression(expr_mat[plot_genes, , drop = FALSE], bininfo$bins)
   hm_scaled <- t(scale(t(be_all)))
   hm_df <- as.data.frame(hm_scaled) %>%
     mutate(gene = rownames(hm_scaled)) %>%
     pivot_longer(-gene, names_to = "bin", values_to = "zscore") %>%
     mutate(bin_num = as.integer(gsub("bin_", "", bin)),
-           gene = factor(gene, levels = rev(top_genes)))
+           gene = factor(gene, levels = rev(plot_genes)))
   p_hm <- ggplot(hm_df, aes(x = bin_num, y = gene, fill = zscore)) +
     geom_tile() +
     scale_fill_viridis_c(option = "inferno", name = "Z-score") +
@@ -494,7 +722,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
   # limitsize = FALSE: height scales with gene count and can exceed ggplot's
   # 50-inch guard at large TOP_N_GENES (e.g. 200 -> 50 in).
   ggsave(file.path(ct_dir, "heatmap_trajectory_combined.pdf"),
-         p_hm, width = 6, height = max(4, length(top_genes) * 0.25),
+         p_hm, width = 6, height = max(4, length(plot_genes) * 0.25),
          limitsize = FALSE)
 
   # ---------------------------------------------------------------------------
@@ -521,11 +749,11 @@ for (ct in CELLTYPES_TRAJECTORY) {
   }
 
   build_profiles <- function(cells) {
-    m <- t(vapply(top_genes,
+    m <- t(vapply(plot_genes,
                   function(g) norm01(smooth_gene(as.numeric(expr_mat[g, cells]),
                                                  ct_score_dec[cells])),
                   numeric(length(score_grid))))
-    rownames(m) <- top_genes
+    rownames(m) <- plot_genes
     m
   }
 
@@ -562,7 +790,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     theme(axis.text.y = element_text(size = 7))
   ggsave(file.path(ct_dir, "normalized_expression_heatmap.pdf"),
          p_wave, width = 4 * nlevels(prof_df$facet),
-         height = max(4, length(top_genes) * 0.22 + 1), limitsize = FALSE)
+         height = max(4, length(plot_genes) * 0.22 + 1), limitsize = FALSE)
 
   # ---------------------------------------------------------------------------
   # GAM fits — loop over selected models
@@ -574,35 +802,47 @@ for (ct in CELLTYPES_TRAJECTORY) {
     gam_dir <- file.path(ct_dir, paste0("gam_", model))
     dir.create(gam_dir, recursive = TRUE, showWarnings = FALSE)
 
-    # Gene set for this model. Models in FULL_GENE_MODELS (pseudobulk, ranef) use
-    # all selected genes; any other model (e.g. fs) re-fits only the top
-    # N_GENES_OTHER_MODELS pseudobulk hits so the expensive fits stay focused.
+    # Gene set for this model. Models in FULL_GENE_MODELS use the full
+    # expression-filtered test_genes set (correct BH denominator, reviewer #5);
+    # any other model (e.g. fs) re-fits only the top N_GENES_OTHER_MODELS
+    # pseudobulk hits so the expensive fits stay focused.
     if (model %in% FULL_GENE_MODELS) {
-      genes_this_model <- top_genes
+      genes_this_model <- test_genes
     } else if (!is.null(pseudobulk_top_genes)) {
       genes_this_model <- head(pseudobulk_top_genes, N_GENES_OTHER_MODELS)
     } else {
-      # Pseudobulk not run this session — fall back to the first N top_genes.
-      genes_this_model <- head(top_genes, N_GENES_OTHER_MODELS)
+      # Pseudobulk not run this session — fall back to the first N test_genes.
+      genes_this_model <- head(test_genes, N_GENES_OTHER_MODELS)
     }
     cat(sprintf("  [%s] fitting %d genes\n", model, length(genes_this_model)))
 
     # Build the data the model needs
-    if (model == "pseudobulk") {
+    if (model %in% c("pseudobulk", "pseudobulk_fs")) {
       pb <- make_pseudobulk(expr_mat, ct_score, ct_sample, ct_condition)
       if (is.null(pb) || nrow(pb$meta) < 10) {
-        cat(sprintf("  [%s] too few pseudobulk groups, skipping\n", model)); next
+        cat(sprintf("  [%s] too few pseudobulk groups (common support too small?), skipping\n", model)); next
+      }
+      # Report the common-support truncation: which bins / score range survived.
+      if (!is.null(pb$support)) {
+        kb <- pb$support$keep_bins
+        cat(sprintf("  [%s] common support: %d/%d bins retained (bins %s); score range [%.3f, %.3f]\n",
+                    model, length(kb), N_BINS, paste(range(kb), collapse = "-"),
+                    min(pb$meta$score), max(pb$meta$score)))
       }
     }
 
     gam_summary <- list()
     fit_curves  <- list()   # per-gene population-level fitted curves (for heatmap)
+    plot_store  <- list()   # per-gene curve+points, kept only to plot SIGNIFICANT genes
     for (gene in genes_this_model) {
-      if (model == "pseudobulk") {
-        # Even decile position of each pseudobulk point (bins are quantile
-        # deciles) -> ~0.05,0.15,...,0.95, matching the heatmap's decile axis.
+      if (model %in% c("pseudobulk", "pseudobulk_fs")) {
+        # x-axis per PB_SCORE_AXIS (reviewer #2): "score" = REAL mean local tumor
+        # fraction of the group (interpretable units, keeps within-bin variation);
+        # "decile" = evenly-spaced bin index (equal plot width per decile).
+        pb_x <- if (PB_SCORE_AXIS == "score") pb$meta$score
+                else (pb$meta$bin - 0.5) / N_BINS
         df_gam <- data.frame(expr = as.numeric(pb$expr[gene, ]),
-                             score = (pb$meta$bin - 0.5) / N_BINS,
+                             score = pb_x,
                              condition = pb$meta$condition,
                              sample = pb$meta$sample, weight = pb$meta$n_cells)
       } else {
@@ -618,28 +858,12 @@ for (ct in CELLTYPES_TRAJECTORY) {
                                         p_level = res$p_level)
       fit_curves[[gene]]  <- res$pred[, c("score", "condition", "fit")]
 
-      if (!(model %in% PLOT_INDIVIDUAL_GAMS)) next
-
-      subt <- paste(c(
-        if (!is.na(res$p_shape)) sprintf("shape p = %.3g", res$p_shape),
-        if (!is.na(res$p_level)) sprintf("level p = %.3g", res$p_level)
-      ), collapse = "   ")
-
-      ylab <- if (model == "pseudobulk") "Mean expression (pseudobulk)" else "Expression"
-      p_gam <- ggplot(res$pred, aes(x = score, y = fit, color = condition, fill = condition)) +
-        geom_ribbon(aes(ymin = ci_lo, ymax = ci_hi), alpha = 0.2, color = NA) +
-        geom_line(linewidth = 1) +
-        { if (model == "pseudobulk")
-            geom_point(data = df_gam, aes(x = score, y = expr, color = condition, size = weight),
-                       alpha = 0.5, inherit.aes = FALSE) } +
-        scale_color_manual(values = CONDITION_COLORS) +
-        scale_fill_manual(values = CONDITION_COLORS) +
-        scale_size_continuous(range = c(1, 4), guide = "none") +
-        labs(x = TRAJ_X_LAB, y = ylab,
-             title = sprintf("%s — %s [%s]", gene, ct, model),
-             subtitle = subt) +
-        theme_publication()
-      ggsave(file.path(gam_dir, sprintf("gam_%s.pdf", gene)), p_gam, width = 5, height = 4)
+      # Stash the full fitted curve (with CI) + underlying points so the per-gene
+      # spline PDFs can be emitted AFTER FDR is known, for the significant genes only.
+      if (model %in% PLOT_INDIVIDUAL_GAMS) {
+        plot_store[[gene]] <- list(pred = res$pred, df = df_gam,
+                                   p_shape = res$p_shape, p_level = res$p_level)
+      }
     }
 
     if (length(gam_summary) > 0) {
@@ -655,6 +879,41 @@ for (ct in CELLTYPES_TRAJECTORY) {
       # Record the pseudobulk shape ranking so fs/ranef (later in the loop) can
       # re-fit its top hits.
       if (model == "pseudobulk") pseudobulk_top_genes <- gs$gene
+
+      # -----------------------------------------------------------------------
+      # Per-gene spline PDFs for the SIGNIFICANT genes only (BH-FDR < SIG_FDR on
+      # shape or level) — the readable subset, emitted now that FDR is known.
+      # -----------------------------------------------------------------------
+      if (model %in% PLOT_INDIVIDUAL_GAMS) {
+        sig_genes <- gs$gene[which(gs$fdr_shape < SIG_FDR | gs$fdr_level < SIG_FDR)]
+        sig_genes <- intersect(sig_genes, names(plot_store))
+        cat(sprintf("  [%s] per-gene spline PDFs for %d significant genes (FDR < %.2f)\n",
+                    model, length(sig_genes), SIG_FDR))
+        ylab <- if (model %in% c("pseudobulk", "pseudobulk_fs"))
+                  "Mean expression (pseudobulk)" else "Expression"
+        xlab_gam <- if (model %in% c("pseudobulk", "pseudobulk_fs")) GAM_X_LAB else TRAJ_X_LAB
+        for (gene in sig_genes) {
+          st <- plot_store[[gene]]
+          subt <- paste(c(
+            if (!is.na(st$p_shape)) sprintf("shape p = %.3g", st$p_shape),
+            if (!is.na(st$p_level)) sprintf("level p = %.3g", st$p_level)
+          ), collapse = "   ")
+          p_gam <- ggplot(st$pred, aes(x = score, y = fit, color = condition, fill = condition)) +
+            geom_ribbon(aes(ymin = ci_lo, ymax = ci_hi), alpha = 0.2, color = NA) +
+            geom_line(linewidth = 1) +
+            { if (model %in% c("pseudobulk", "pseudobulk_fs"))
+                geom_point(data = st$df, aes(x = score, y = expr, color = condition, size = weight),
+                           alpha = 0.5, inherit.aes = FALSE) } +
+            scale_color_manual(values = CONDITION_COLORS) +
+            scale_fill_manual(values = CONDITION_COLORS) +
+            scale_size_continuous(range = c(1, 4), guide = "none") +
+            labs(x = xlab_gam, y = ylab,
+                 title = sprintf("%s — %s [%s]", gene, ct, model),
+                 subtitle = subt) +
+            theme_publication()
+          ggsave(file.path(gam_dir, sprintf("gam_%s.pdf", gene)), p_gam, width = 5, height = 4)
+        }
+      }
 
       # -----------------------------------------------------------------------
       # Significant-trajectory heatmap: WT | DKO GAM-fitted curves, only genes
