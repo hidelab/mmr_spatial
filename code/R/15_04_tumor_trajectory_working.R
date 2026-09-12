@@ -112,6 +112,32 @@ SVG_GENES         <- NULL
 #                     on the ~140 pseudobulk points. Expect FAR fewer significant
 #                     genes than "pseudobulk"/"ranef" — that drop is the correct
 #                     answer given the true n = 3 WT + 4 DKO, not a failure.
+#   "pseudobulk_nb" — pseudobulk_rs random structure (random INTERCEPT + random
+#                     LINEAR SLOPE, select=TRUE + gamma) but fit as a proper
+#                     NEGATIVE-BINOMIAL GAM on SUMMED RAW COUNTS with a
+#                     log(library-size) OFFSET (reviewer point #3-B). Removes the
+#                     mean-of-log-normalized bias of the Gaussian pseudobulk specs:
+#                     counts are summed per sample x bin, family=nb() models the
+#                     count mean-variance relation, and the offset absorbs
+#                     sequencing depth (incl. the systematically higher DKO library
+#                     size). Same ordered-factor difference-smooth condition test
+#                     (p_shape/p_level, now on the log link). NO n_cells weights —
+#                     the offset carries depth (reviewer #3-D). This is the
+#                     pseudobulk analog of tradeSeq's cell-level NB-GAM (15_07), but
+#                     at the sample x bin level with a between-mouse random structure.
+#   "pseudobulk_rs" — same pseudobulk data, but the per-sample fs CURVE is
+#                     replaced by a random INTERCEPT s(sample,bs="re") + random
+#                     LINEAR SLOPE s(score,sample,bs="re") — two variance
+#                     components instead of a penalized curve family. Far better
+#                     conditioned at 7 samples / ~9 points per mouse (no basis
+#                     saturation), so it needs NO FS_K clamp and is order-stable
+#                     by construction (reviewer: fs is over-parameterized here).
+#                     Still puts between-mouse LEVEL + linear-TREND heterogeneity
+#                     in the error term; only NON-linear per-mouse shape (which is
+#                     unidentifiable at 7 mice anyway) is given up. Fit with
+#                     select=TRUE + gamma>1 (see RS_SELECT / RS_GAMMA) so the
+#                     difference smooth can shrink to exactly zero. This is the
+#                     more standard, more defensible shape spec at this n.
 #   "ranef"         — single-cell GAM, random INTERCEPT s(sample,bs="re").
 #   "fs"            — single-cell factor-smooth (slow; the pseudobulk_fs variant
 #                     is preferred for the shape test).
@@ -122,8 +148,16 @@ SVG_GENES         <- NULL
 # residuals, not the 7 mice) — treat them as exploratory rankings. pseudobulk_fs is
 # the defensible shape test; p_level (level offset) is the trustworthy
 # between-mouse level test in all specs.
-GAM_MODELS <- c("pseudobulk", "pseudobulk_fs")
-GAM_K      <- 5
+GAM_MODELS <- c("pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")
+# Specs fitted on the sample x bin PSEUDOBULK data (vs the single-cell "fs"/"ranef").
+# Used throughout to decide pseudobulk-data build + axis labels.
+PSEUDOBULK_MODELS <- c("pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")
+# Subset of PSEUDOBULK_MODELS whose pseudobulk is built by SUMMING RAW COUNTS (not
+# averaging the log-normalized data layer) and fit with family=nb() + a
+# log(library-size) offset. These need the counts matrix + a per-group library size,
+# so they build a different pseudobulk object (agg="sum") than the Gaussian specs.
+PSEUDOBULK_NB_MODELS <- c("pseudobulk_nb")
+GAM_K      <- 4
 # Basis dimension for the per-sample factor-smooth s(score, sample, bs="fs"). MUST be
 # kept small: with only ~9 pseudobulk points per sample, a high-k fs smooth
 # near-saturates the model, the REML smoothing-parameter surface becomes multimodal,
@@ -131,10 +165,18 @@ GAM_K      <- 5
 # is well-determined here and makes the fit exactly order-invariant. The trajectory
 # smooths s(score)/by-smooth stay at GAM_K.
 FS_K       <- 3
+# --- pseudobulk_rs (random intercept + random slope) fit settings ------------
+# rs uses NO FS_K (it has no per-sample basis to saturate). select=TRUE adds a
+# shrinkage penalty on each smooth's null space so the ordered-factor DIFFERENCE
+# smooth can shrink to exactly zero (removes the unpenalized-linear boundary that
+# makes the by-smooth p-value anticonservative; Marra & Wood 2011). gamma>1
+# multiplies the edf cost in REML, biasing toward smoother fits (Wood ~1.4).
+RS_SELECT <- TRUE
+RS_GAMMA  <- 1.4
 # Models fit on the FULL test_genes set (all expression-filtered genes). Any GAM
 # model in GAM_MODELS but NOT here is restricted to the top N_GENES_OTHER_MODELS
 # pseudobulk genes (cheap cross-check).
-FULL_GENE_MODELS     <- c("pseudobulk", "ranef", "pseudobulk_fs")
+FULL_GENE_MODELS     <- c("pseudobulk", "ranef", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")
 N_GENES_OTHER_MODELS <- 10   # gene budget for non-full models (e.g. "fs")
 
 # --- Condition-test visualization -------------------------------------------
@@ -167,7 +209,7 @@ CELLTYPES_TRAJECTORY <- c("CD8+ T")
 APPLY_QC <- FALSE
 
 stopifnot(SCORE_METHOD %in% c("kde", "knn", "diffusion"))
-stopifnot(all(GAM_MODELS %in% c("fs", "ranef", "pseudobulk", "pseudobulk_fs")))
+stopifnot(all(GAM_MODELS %in% c("fs", "ranef", "pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")))
 stopifnot(GENE_SELECTION %in% c("binned_variance", "spearman", "svg"))
 stopifnot(HEATMAP_ROW_ORDER %in% c("cluster", "shape"))
 stopifnot(PB_SCORE_AXIS %in% c("score", "decile"))
@@ -221,6 +263,7 @@ write_param_report <- function(dir) {
         MIN_SAMPLES_EXPRESSED = MIN_SAMPLES_EXPRESSED),
     grp("gam_models",
         GAM_MODELS = GAM_MODELS, GAM_K = GAM_K, FS_K = FS_K,
+        RS_SELECT = RS_SELECT, RS_GAMMA = RS_GAMMA,
         FULL_GENE_MODELS = FULL_GENE_MODELS,
         N_GENES_OTHER_MODELS = N_GENES_OTHER_MODELS),
     grp("condition_test_viz",
@@ -390,7 +433,12 @@ select_genes <- function(expr_mat, score_vec, method = GENE_SELECTION,
 make_pseudobulk <- function(expr_mat, score_vec, sample_vec, condition_vec,
                             n_bins = N_BINS, min_cells = MIN_CELLS_PER_BIN,
                             common_support = COMMON_SUPPORT,
-                            min_samp_per_cond = MIN_SAMPLES_PER_COND_PER_BIN) {
+                            min_samp_per_cond = MIN_SAMPLES_PER_COND_PER_BIN,
+                            agg = c("mean", "sum")) {
+  # agg = "mean" -> per-gene mean of the log-normalized data layer (Gaussian specs);
+  #       "sum"  -> per-gene SUM of raw counts (NB-GAM specs), and libsize (group
+  #                 total counts) is recorded for the log-offset.
+  agg <- match.arg(agg)
   b <- make_bins(score_vec, n_bins)
   bins <- as.integer(b$bins)
   groups <- paste(sample_vec, bins, sep = "__")
@@ -402,7 +450,8 @@ make_pseudobulk <- function(expr_mat, score_vec, sample_vec, condition_vec,
     parts <- strsplit(g, "__")[[1]]
     bin_id <- as.integer(parts[2])
     if (is.na(bin_id)) next
-    pb_list[[g]] <- rowMeans(expr_mat[, cell_idx, drop = FALSE])
+    pb_list[[g]] <- if (agg == "sum") rowSums(expr_mat[, cell_idx, drop = FALSE])
+                    else             rowMeans(expr_mat[, cell_idx, drop = FALSE])
     pb_meta[[g]] <- data.frame(
       group = g, sample = parts[1],
       condition = as.character(condition_vec[cell_idx[1]]),
@@ -411,6 +460,9 @@ make_pseudobulk <- function(expr_mat, score_vec, sample_vec, condition_vec,
       # #2), NOT the bin index — so fitted curves are in interpretable score units
       # and within-bin score variation is retained.
       score = mean(score_vec[cell_idx]),
+      # NB log-offset source: group total counts across ALL input rows. NA for the
+      # mean-of-log build (never read there).
+      libsize = if (agg == "sum") sum(expr_mat[, cell_idx]) else NA_real_,
       n_cells = length(cell_idx), stringsAsFactors = FALSE)
   }
   if (length(pb_list) == 0) return(NULL)
@@ -476,6 +528,10 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
 
   # Model-specific formula (reference + difference smooth + offset + rand eff)
   # and the random-effect term to exclude when predicting population curves.
+  # sel / gam_gamma default to gam()'s defaults (no double penalty, gamma 1); fam
+  # defaults to gaussian(). pseudobulk_rs overrides sel/gam_gamma; pseudobulk_nb
+  # overrides all three (NB family) and adds a log-library-size offset.
+  sel <- FALSE; gam_gamma <- 1; fam <- gaussian()
   if (model == "pseudobulk") {
     if (nlevels(df$sample) < 2) return(list(ok = FALSE))
     # Sample random intercept so the ~n pseudobulk points (from only 7 samples)
@@ -497,6 +553,35 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
                    cond_ord + s(score, sample, bs = "fs", k = fs_k)
     excl <- "s(score,sample)"
     wcol <- df$weight
+  } else if (model == "pseudobulk_rs") {
+    if (nlevels(df$sample) < 2) return(list(ok = FALSE))
+    # Pseudobulk data + random INTERCEPT s(sample,bs="re") and random LINEAR SLOPE
+    # s(score,sample,bs="re"): two variance components in place of the per-sample fs
+    # curve. Well-conditioned at 7 samples (no basis saturation) -> order-stable with
+    # NO FS_K clamp. Between-mouse level + linear-trend heterogeneity stays in the
+    # error term. select=TRUE + gamma>1 (RS_SELECT / RS_GAMMA) make the by-smooth able
+    # to shrink to zero and bias toward smoother fits. BOTH random terms are excluded
+    # from the population-curve prediction.
+    form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
+                   cond_ord + s(sample, bs = "re") + s(score, sample, bs = "re")
+    excl <- c("s(sample)", "s(score,sample)")
+    wcol <- df$weight
+    sel  <- RS_SELECT; gam_gamma <- RS_GAMMA
+  } else if (model == "pseudobulk_nb") {
+    if (nlevels(df$sample) < 2) return(list(ok = FALSE))
+    # NB-GAM on SUMMED RAW COUNTS + log(library-size) offset (reviewer #3-B), with the
+    # pseudobulk_rs between-mouse random structure: random INTERCEPT s(sample,bs="re")
+    # + random LINEAR SLOPE s(score,sample,bs="re"). family=nb() estimates the count
+    # dispersion; the offset absorbs sequencing depth (incl. the DKO>WT library-size
+    # gap), so NO n_cells weights (reviewer #3-D). select + gamma let the difference
+    # smooth shrink to zero, as in rs. Both random terms + the offset are handled in
+    # the population-curve prediction (offset held at its mean; see below).
+    form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
+                   cond_ord + s(sample, bs = "re") + s(score, sample, bs = "re") +
+                   offset(log_libsize)
+    excl <- c("s(sample)", "s(score,sample)")
+    wcol <- NULL
+    sel  <- RS_SELECT; gam_gamma <- RS_GAMMA; fam <- nb()
   } else if (model == "fs") {
     if (nlevels(df$sample) < 2) return(list(ok = FALSE))
     form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
@@ -512,7 +597,9 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
   }
 
   # Single REML fit serves both the plotted curve and the significance tests.
-  fit <- tryCatch(gam(form, data = df, weights = wcol, method = "REML"),
+  # select / gamma are gam() defaults (FALSE / 1) except for pseudobulk_rs.
+  fit <- tryCatch(gam(form, data = df, weights = wcol, family = fam, method = "REML",
+                      select = sel, gamma = gam_gamma),
                   error = function(e) NULL)
   if (is.null(fit)) return(list(ok = FALSE))
 
@@ -543,6 +630,10 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
     cond_ord = ordered(c(REFERENCE_CONDITION, TEST_CONDITION),
                        levels = c(REFERENCE_CONDITION, TEST_CONDITION)))
   newd$sample <- df$sample[1]   # dummy; excluded from prediction
+  # NB model carries a log(library-size) offset; predict at the MEAN depth so the
+  # population curve is on the log-E[count] scale at a representative library size
+  # (a constant offset shift, irrelevant to the z-scored heatmap / difference test).
+  if (model == "pseudobulk_nb") newd$log_libsize <- mean(df$log_libsize)
   pred <- predict(fit, newdata = newd, se.fit = TRUE,
                   exclude = excl, newdata.guaranteed = TRUE)
   newd$condition <- factor(as.character(newd$cond_ord),
@@ -817,8 +908,12 @@ for (ct in CELLTYPES_TRAJECTORY) {
     cat(sprintf("  [%s] fitting %d genes\n", model, length(genes_this_model)))
 
     # Build the data the model needs
-    if (model %in% c("pseudobulk", "pseudobulk_fs")) {
-      pb <- make_pseudobulk(expr_mat, ct_score, ct_sample, ct_condition)
+    if (model %in% PSEUDOBULK_MODELS) {
+      # NB specs sum RAW COUNTS (+ carry a library-size offset); the Gaussian specs
+      # average the log-normalized data layer.
+      pb <- if (model %in% PSEUDOBULK_NB_MODELS)
+              make_pseudobulk(counts_ct, ct_score, ct_sample, ct_condition, agg = "sum")
+            else make_pseudobulk(expr_mat, ct_score, ct_sample, ct_condition, agg = "mean")
       if (is.null(pb) || nrow(pb$meta) < 10) {
         cat(sprintf("  [%s] too few pseudobulk groups (common support too small?), skipping\n", model)); next
       }
@@ -835,7 +930,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     fit_curves  <- list()   # per-gene population-level fitted curves (for heatmap)
     plot_store  <- list()   # per-gene curve+points, kept only to plot SIGNIFICANT genes
     for (gene in genes_this_model) {
-      if (model %in% c("pseudobulk", "pseudobulk_fs")) {
+      if (model %in% PSEUDOBULK_MODELS) {
         # x-axis per PB_SCORE_AXIS (reviewer #2): "score" = REAL mean local tumor
         # fraction of the group (interpretable units, keeps within-bin variation);
         # "decile" = evenly-spaced bin index (equal plot width per decile).
@@ -845,6 +940,10 @@ for (ct in CELLTYPES_TRAJECTORY) {
                              score = pb_x,
                              condition = pb$meta$condition,
                              sample = pb$meta$sample, weight = pb$meta$n_cells)
+        # NB-GAM log-offset = log of the group's total counts (floored at 1 to guard
+        # against log(0)). expr here is summed raw counts, not mean log-norm.
+        if (model %in% PSEUDOBULK_NB_MODELS)
+          df_gam$log_libsize <- log(pmax(pb$meta$libsize, 1))
       } else {
         df_gam <- data.frame(expr = as.numeric(expr_mat[gene, ]),
                              score = ct_score_dec, condition = ct_condition,
@@ -889,20 +988,29 @@ for (ct in CELLTYPES_TRAJECTORY) {
         sig_genes <- intersect(sig_genes, names(plot_store))
         cat(sprintf("  [%s] per-gene spline PDFs for %d significant genes (FDR < %.2f)\n",
                     model, length(sig_genes), SIG_FDR))
-        ylab <- if (model %in% c("pseudobulk", "pseudobulk_fs"))
+        ylab <- if (model %in% PSEUDOBULK_NB_MODELS)
+                  "log E[counts] (NB-GAM, depth-adjusted)"
+                else if (model %in% PSEUDOBULK_MODELS)
                   "Mean expression (pseudobulk)" else "Expression"
-        xlab_gam <- if (model %in% c("pseudobulk", "pseudobulk_fs")) GAM_X_LAB else TRAJ_X_LAB
+        xlab_gam <- if (model %in% PSEUDOBULK_MODELS) GAM_X_LAB else TRAJ_X_LAB
         for (gene in sig_genes) {
           st <- plot_store[[gene]]
           subt <- paste(c(
             if (!is.na(st$p_shape)) sprintf("shape p = %.3g", st$p_shape),
             if (!is.na(st$p_level)) sprintf("level p = %.3g", st$p_level)
           ), collapse = "   ")
+          # For NB the fitted curve is on the log-E[count] scale at the MEAN library
+          # size; put the observed summed counts on that same depth-adjusted log scale
+          # (log(count+0.5) - log_libsize + mean log_libsize) so they overlay the curve.
+          pts_df <- st$df
+          if (model %in% PSEUDOBULK_NB_MODELS)
+            pts_df$expr <- log(pts_df$expr + 0.5) - pts_df$log_libsize +
+                           mean(pts_df$log_libsize)
           p_gam <- ggplot(st$pred, aes(x = score, y = fit, color = condition, fill = condition)) +
             geom_ribbon(aes(ymin = ci_lo, ymax = ci_hi), alpha = 0.2, color = NA) +
             geom_line(linewidth = 1) +
-            { if (model %in% c("pseudobulk", "pseudobulk_fs"))
-                geom_point(data = st$df, aes(x = score, y = expr, color = condition, size = weight),
+            { if (model %in% PSEUDOBULK_MODELS)
+                geom_point(data = pts_df, aes(x = score, y = expr, color = condition, size = weight),
                            alpha = 0.5, inherit.aes = FALSE) } +
             scale_color_manual(values = CONDITION_COLORS) +
             scale_fill_manual(values = CONDITION_COLORS) +
