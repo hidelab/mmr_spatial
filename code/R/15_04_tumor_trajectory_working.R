@@ -64,8 +64,24 @@ DIFFUSION_LOCAL_FRACTION <- TRUE
 TARGET_CELLTYPE <- "Tumor"
 
 # --- Binning / genes ---------------------------------------------------------
-N_BINS            <- 10
+N_BINS            <- 5
 MIN_CELLS_PER_BIN <- 5
+# --- Adaptive binning (optional) ---------------------------------------------
+# When ADAPTIVE_N_BINS is TRUE, N_BINS is chosen PER CELL TYPE instead of using
+# the fixed value above: candidate bin counts in [ADAPTIVE_N_BINS_MIN,
+# ADAPTIVE_N_BINS_MAX] are scanned and the LARGEST n is picked for which at least
+# (n - ADAPTIVE_BIN_TOL_K) bins are "valid" — i.e. at most k candidate bins fail.
+# A bin is VALID if it would survive the common-support rule: it has
+# >= MIN_SAMPLES_PER_COND_PER_BIN distinct samples in BOTH conditions, each
+# contributing >= MIN_CELLS_PER_BIN cells (exactly the bins that feed the
+# pseudobulk GAM). This keeps the binning as fine as the data support while
+# tolerating k sparse tail bins (default k=2). The fixed N_BINS above is used when
+# ADAPTIVE_N_BINS is FALSE (and remains the report's nominal value). The chosen n
+# and the full scan are logged per cell type to <celltype>/adaptive_nbins_scan.csv.
+ADAPTIVE_N_BINS     <- FALSE
+ADAPTIVE_N_BINS_MIN <- 5
+ADAPTIVE_N_BINS_MAX <- 20
+ADAPTIVE_BIN_TOL_K  <- 0
 # --- Common support (reviewer follow-up #1) ----------------------------------
 # The fs difference smooth must be estimated from DATA in both conditions, not
 # extrapolated by shrinkage where one condition has no cells. Because DKO tumor
@@ -125,6 +141,18 @@ SVG_GENES         <- NULL
 #                     the offset carries depth (reviewer #3-D). This is the
 #                     pseudobulk analog of tradeSeq's cell-level NB-GAM (15_07), but
 #                     at the sample x bin level with a between-mouse random structure.
+#   "pseudobulk_nb_fs" — COUNT-BASED version of the defensible shape spec: NB-GAM on
+#                     summed raw counts + log(library-size) offset (like
+#                     pseudobulk_nb) BUT with the per-sample factor SMOOTH random
+#                     effect s(score,sample,bs="fs",k=FS_K) of pseudobulk_fs instead
+#                     of the rs random slope. Pairs the correct count likelihood with
+#                     the correct null for p_shape — between-mouse curve-SHAPE
+#                     heterogeneity goes into the error term, not condition. fs
+#                     subsumes the per-sample intercept (no re term); FS_K kept small
+#                     for order-stability; no n_cells weights (offset carries depth).
+#                     The most defensible single spec when a count likelihood is
+#                     wanted for the shape test — still bounded by the n=3v4
+#                     permutation floor, so report as a ranking, not per-gene FDR.
 #   "pseudobulk_rs" — same pseudobulk data, but the per-sample fs CURVE is
 #                     replaced by a random INTERCEPT s(sample,bs="re") + random
 #                     LINEAR SLOPE s(score,sample,bs="re") — two variance
@@ -148,16 +176,16 @@ SVG_GENES         <- NULL
 # residuals, not the 7 mice) — treat them as exploratory rankings. pseudobulk_fs is
 # the defensible shape test; p_level (level offset) is the trustworthy
 # between-mouse level test in all specs.
-GAM_MODELS <- c("pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")
+GAM_MODELS <- c("pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb", "pseudobulk_nb_fs")
 # Specs fitted on the sample x bin PSEUDOBULK data (vs the single-cell "fs"/"ranef").
 # Used throughout to decide pseudobulk-data build + axis labels.
-PSEUDOBULK_MODELS <- c("pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")
+PSEUDOBULK_MODELS <- c("pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb", "pseudobulk_nb_fs")
 # Subset of PSEUDOBULK_MODELS whose pseudobulk is built by SUMMING RAW COUNTS (not
 # averaging the log-normalized data layer) and fit with family=nb() + a
 # log(library-size) offset. These need the counts matrix + a per-group library size,
 # so they build a different pseudobulk object (agg="sum") than the Gaussian specs.
-PSEUDOBULK_NB_MODELS <- c("pseudobulk_nb")
-GAM_K      <- 4
+PSEUDOBULK_NB_MODELS <- c("pseudobulk_nb", "pseudobulk_nb_fs")
+GAM_K      <- 5
 # Basis dimension for the per-sample factor-smooth s(score, sample, bs="fs"). MUST be
 # kept small: with only ~9 pseudobulk points per sample, a high-k fs smooth
 # near-saturates the model, the REML smoothing-parameter surface becomes multimodal,
@@ -165,6 +193,19 @@ GAM_K      <- 4
 # is well-determined here and makes the fit exactly order-invariant. The trajectory
 # smooths s(score)/by-smooth stay at GAM_K.
 FS_K       <- 3
+# Penalty ORDER of the per-sample factor-smooth s(score, sample, bs="fs", m=FS_M).
+# The other lever (besides FS_K) for controlling per-sample-curve complexity, and the
+# reviewer's suggested alternative to clamping FS_K: m sets which derivative the
+# penalty acts on. m=2 (default) penalizes the 2nd derivative (curvature) -> pulls each
+# per-sample curve toward a straight line (unpenalized null space {1, x}). m=1
+# penalizes the 1st derivative (slope) -> pulls toward a flat constant (null space {1}),
+# shrinking the per-mouse effective parameters harder. Both notes.md-tested stable at
+# n=3v4: the current default is FS_K=3, m=2 (fewer basis fns, curvature penalty); the
+# reviewer's alternative FS_K=5, FS_M=1 keeps fine per-sample resolution with a stiffer
+# lower-order penalty. Stable configs give DIFFERENT hit lists — a legitimate modelling
+# choice, not instability (notes.md 2026-09-10). Applies to every fs term:
+# pseudobulk_fs, pseudobulk_nb_fs, and single-cell fs. For a 1-D marginal smooth m>=1.
+FS_M       <- 2
 # --- pseudobulk_rs (random intercept + random slope) fit settings ------------
 # rs uses NO FS_K (it has no per-sample basis to saturate). select=TRUE adds a
 # shrinkage penalty on each smooth's null space so the ordered-factor DIFFERENCE
@@ -176,7 +217,7 @@ RS_GAMMA  <- 1.4
 # Models fit on the FULL test_genes set (all expression-filtered genes). Any GAM
 # model in GAM_MODELS but NOT here is restricted to the top N_GENES_OTHER_MODELS
 # pseudobulk genes (cheap cross-check).
-FULL_GENE_MODELS     <- c("pseudobulk", "ranef", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")
+FULL_GENE_MODELS     <- c("pseudobulk", "ranef", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb", "pseudobulk_nb_fs")
 N_GENES_OTHER_MODELS <- 10   # gene budget for non-full models (e.g. "fs")
 
 # --- Condition-test visualization -------------------------------------------
@@ -184,9 +225,14 @@ N_GENES_OTHER_MODELS <- 10   # gene budget for non-full models (e.g. "fs")
 # per-gene gam_<gene>.pdf splines; character(0) disables them entirely. To keep the
 # folder readable, PDFs are emitted ONLY for genes passing BH-FDR < SIG_FDR (shape
 # or level) for that model — the same set shown in the significant-trajectory
-# heatmap — not for every tested gene. Must name models that are in GAM_MODELS
-# (default: the primary pseudobulk_fs spec).
-PLOT_INDIVIDUAL_GAMS <- c("pseudobulk_fs")
+# heatmap — not for every tested gene. Must name models that are in GAM_MODELS.
+# Default: every pseudobulk spec (PSEUDOBULK_MODELS), so each gam_<model>/ folder
+# gets its own per-gene splines for side-by-side comparison. Set to c("pseudobulk_fs")
+# for just the primary spec, or character(0) to disable entirely. Each gam_<model>/
+# also gets a per_sample_curves/ subfolder with one gam_<gene>_per_sample.pdf per
+# significant gene: the WT/DKO population curves overlaid with EACH sample's own
+# fitted trajectory (random effect included), showing the between-mouse spread.
+PLOT_INDIVIDUAL_GAMS <- PSEUDOBULK_MODELS
 # BH-FDR cutoff for a gene to enter the significant-trajectory heatmap. A gene is
 # kept if fdr_shape < SIG_FDR OR fdr_level < SIG_FDR. Set to 0.1 (was 0.05) to
 # admit borderline trajectory-shape genes (e.g. Klrk1, Cxcr6) for visualization;
@@ -206,13 +252,18 @@ CELLTYPES_TRAJECTORY <- c("CD8+ T")
 # computing the tumor-proximity score — the tumor field is a property of tissue
 # architecture, so every physically present cell (QC-pass or not) should shape it.
 # Default FALSE: reviewed and the QC filter is intentionally OFF for this analysis.
-APPLY_QC <- FALSE
+APPLY_QC <- TRUE
 
 stopifnot(SCORE_METHOD %in% c("kde", "knn", "diffusion"))
-stopifnot(all(GAM_MODELS %in% c("fs", "ranef", "pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb")))
+stopifnot(all(GAM_MODELS %in% c("fs", "ranef", "pseudobulk", "pseudobulk_fs", "pseudobulk_rs", "pseudobulk_nb", "pseudobulk_nb_fs")))
 stopifnot(GENE_SELECTION %in% c("binned_variance", "spearman", "svg"))
 stopifnot(HEATMAP_ROW_ORDER %in% c("cluster", "shape"))
 stopifnot(PB_SCORE_AXIS %in% c("score", "decile"))
+# fs penalty order: 1-D marginal smooth requires 2*m > d = 1, so m >= 1; k must
+# exceed the null-space dimension (m + 1) for the penalized part to exist.
+stopifnot(FS_M >= 1, FS_K > FS_M)
+stopifnot(is.logical(ADAPTIVE_N_BINS), ADAPTIVE_N_BINS_MIN >= 2,
+          ADAPTIVE_N_BINS_MAX >= ADAPTIVE_N_BINS_MIN, ADAPTIVE_BIN_TOL_K >= 0)
 
 # =============================================================================
 # Parameter report (written FIRST, before any heavy computation)
@@ -252,7 +303,13 @@ write_param_report <- function(dir) {
         KNN_K = KNN_K, KDE_BW_SCALE = KDE_BW_SCALE, KDE_GRID_N = KDE_GRID_N,
         TARGET_CELLTYPE = TARGET_CELLTYPE),
     grp("binning_support",
-        N_BINS = N_BINS, MIN_CELLS_PER_BIN = MIN_CELLS_PER_BIN,
+        N_BINS = if (ADAPTIVE_N_BINS) sprintf("%d (nominal; adaptive per cell type)", N_BINS)
+                 else N_BINS,
+        MIN_CELLS_PER_BIN = MIN_CELLS_PER_BIN,
+        ADAPTIVE_N_BINS = ADAPTIVE_N_BINS,
+        ADAPTIVE_N_BINS_MIN = ADAPTIVE_N_BINS_MIN,
+        ADAPTIVE_N_BINS_MAX = ADAPTIVE_N_BINS_MAX,
+        ADAPTIVE_BIN_TOL_K = ADAPTIVE_BIN_TOL_K,
         COMMON_SUPPORT = COMMON_SUPPORT,
         MIN_SAMPLES_PER_COND_PER_BIN = MIN_SAMPLES_PER_COND_PER_BIN,
         PB_SCORE_AXIS = PB_SCORE_AXIS),
@@ -262,7 +319,7 @@ write_param_report <- function(dir) {
         MIN_COUNTS_PER_SAMPLE = MIN_COUNTS_PER_SAMPLE,
         MIN_SAMPLES_EXPRESSED = MIN_SAMPLES_EXPRESSED),
     grp("gam_models",
-        GAM_MODELS = GAM_MODELS, GAM_K = GAM_K, FS_K = FS_K,
+        GAM_MODELS = GAM_MODELS, GAM_K = GAM_K, FS_K = FS_K, FS_M = FS_M,
         RS_SELECT = RS_SELECT, RS_GAMMA = RS_GAMMA,
         FULL_GENE_MODELS = FULL_GENE_MODELS,
         N_GENES_OTHER_MODELS = N_GENES_OTHER_MODELS),
@@ -281,7 +338,7 @@ write_param_report <- function(dir) {
   write.csv(rep_df, file.path(dir, "run_parameters.csv"), row.names = FALSE)
   con <- file(file.path(dir, "run_parameters.txt"), open = "wt")
   writeLines(c(strrep("=", 78),
-               "15_04 tumor-trajectory working — run parameters",
+               "15_04 tumor-trajectory working run parameters",
                strrep("=", 78)), con)
   for (g in unique(rep_df$group)) {
     writeLines(sprintf("\n-- %s --", g), con)
@@ -383,6 +440,52 @@ make_bins <- function(score_vec, n_bins = N_BINS) {
   list(bins = bins, breaks = bin_breaks, midpoints = midpoints)
 }
 
+# --- Adaptive N_BINS selection ----------------------------------------------
+# For a candidate bin count, how many bins would be RETAINED under the common-
+# support rule: >= min_samp_per_cond distinct samples in BOTH conditions, each
+# with >= min_cells cells. These are exactly the bins that feed the pseudobulk GAM
+# (see make_pseudobulk()'s common_support filter), so this is the meaningful
+# "valid bin" count whether or not COMMON_SUPPORT is toggled on for the fit.
+count_valid_bins <- function(score_vec, sample_vec, condition_vec, n_bins,
+                             min_cells = MIN_CELLS_PER_BIN,
+                             min_samp_per_cond = MIN_SAMPLES_PER_COND_PER_BIN) {
+  b   <- make_bins(score_vec, n_bins)
+  df  <- data.frame(bin = as.integer(b$bins),
+                    sample = as.character(sample_vec),
+                    condition = as.character(condition_vec))
+  df  <- df[!is.na(df$bin), ]
+  grp <- df %>% dplyr::count(bin, sample, condition, name = "n_cells") %>%
+                dplyr::filter(n_cells >= min_cells)
+  if (nrow(grp) == 0) return(0L)
+  per_bin <- grp %>% dplyr::group_by(bin) %>%
+    dplyr::summarise(
+      n_wt  = dplyr::n_distinct(sample[condition == REFERENCE_CONDITION]),
+      n_dko = dplyr::n_distinct(sample[condition == TEST_CONDITION]),
+      .groups = "drop")
+  as.integer(sum(per_bin$n_wt >= min_samp_per_cond &
+                 per_bin$n_dko >= min_samp_per_cond))
+}
+
+# Pick the LARGEST candidate n in [n_min, n_max] with #valid >= n - k. Scans from
+# n_max downward so the first satisfying n is the maximum; falls back to n_min
+# (with a warning) if none qualify. The full scan table is attached as attr "scan".
+choose_adaptive_nbins <- function(score_vec, sample_vec, condition_vec,
+                                  k = ADAPTIVE_BIN_TOL_K,
+                                  n_min = ADAPTIVE_N_BINS_MIN,
+                                  n_max = ADAPTIVE_N_BINS_MAX) {
+  cand <- seq.int(n_max, n_min)
+  vals <- vapply(cand, function(n)
+    count_valid_bins(score_vec, sample_vec, condition_vec, n), integer(1))
+  pass <- vals >= (cand - k)
+  chosen <- as.integer(if (any(pass)) cand[which(pass)[1]] else n_min)
+  if (!any(pass))
+    warning(sprintf("adaptive N_BINS: no n in [%d,%d] has >= n-%d valid bins; using %d",
+                    n_min, n_max, k, n_min))
+  attr(chosen, "scan") <- data.frame(n_bins = cand, n_valid = vals,
+                                     required = cand - k, pass = pass)
+  chosen
+}
+
 # Mean expression per bin (genes x bins).
 binned_expression <- function(expr_mat, bins, n_bins = N_BINS) {
   out <- matrix(NA, nrow = nrow(expr_mat), ncol = n_bins,
@@ -403,7 +506,7 @@ select_genes <- function(expr_mat, score_vec, method = GENE_SELECTION,
                          top_n = TOP_N_GENES) {
   if (method == "svg") {
     if (is.null(SVG_GENES))
-      stop("GENE_SELECTION='svg' but SVG_GENES is NULL — populate SVG_GENES first.")
+      stop("GENE_SELECTION='svg' but SVG_GENES is NULL - populate SVG_GENES first.")
     g <- intersect(SVG_GENES, rownames(expr_mat))
     gene_means <- rowMeans(expr_mat[g, , drop = FALSE])
     return(g[gene_means > 0.05][seq_len(min(top_n, sum(gene_means > 0.05)))])
@@ -516,7 +619,7 @@ make_pseudobulk <- function(expr_mat, score_vec, sample_vec, condition_vec,
 #               the trajectory question; the novel result.
 #   * p_level = does the OVERALL level differ (parametric offset) — already
 #               captured by standard bulk DKO-vs-WT DE.
-fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
+fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K, fs_m = FS_M) {
   df$condition <- droplevels(factor(df$condition,
                                     levels = c(REFERENCE_CONDITION, TEST_CONDITION)))
   df$sample <- droplevels(factor(df$sample))
@@ -550,7 +653,7 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
     # Weighted by n_cells like the standard pseudobulk fit. fs term uses the smaller
     # fs_k (not gam_k) to keep the per-sample smooth well-determined -> order-stable.
     form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
-                   cond_ord + s(score, sample, bs = "fs", k = fs_k)
+                   cond_ord + s(score, sample, bs = "fs", k = fs_k, m = fs_m)
     excl <- "s(score,sample)"
     wcol <- df$weight
   } else if (model == "pseudobulk_rs") {
@@ -582,10 +685,25 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
     excl <- c("s(sample)", "s(score,sample)")
     wcol <- NULL
     sel  <- RS_SELECT; gam_gamma <- RS_GAMMA; fam <- nb()
+  } else if (model == "pseudobulk_nb_fs") {
+    if (nlevels(df$sample) < 2) return(list(ok = FALSE))
+    # NB-GAM on SUMMED RAW COUNTS + log(library-size) offset (reviewer #3-B) with the
+    # pseudobulk_fs per-sample factor SMOOTH random effect: each sample gets its own
+    # penalized curve, so between-mouse trajectory-SHAPE heterogeneity is in the error
+    # term (the correct null for p_shape) AND the count likelihood is correct. The fs
+    # term subsumes the per-sample intercept, so no separate s(sample,bs="re"). fs_k
+    # kept small (order-stable, see notes.md 2026-09-10). No n_cells weights (offset
+    # carries depth). select/gamma left at gam() defaults, matching pseudobulk_fs.
+    form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
+                   cond_ord + s(score, sample, bs = "fs", k = fs_k, m = fs_m) +
+                   offset(log_libsize)
+    excl <- "s(score,sample)"
+    wcol <- NULL
+    fam  <- nb()
   } else if (model == "fs") {
     if (nlevels(df$sample) < 2) return(list(ok = FALSE))
     form <- expr ~ s(score, k = gam_k) + s(score, by = cond_ord, k = gam_k) +
-                   cond_ord + s(score, sample, bs = "fs", k = fs_k)
+                   cond_ord + s(score, sample, bs = "fs", k = fs_k, m = fs_m)
     excl <- "s(score,sample)"
     wcol <- NULL
   } else if (model == "ranef") {
@@ -633,7 +751,7 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
   # NB model carries a log(library-size) offset; predict at the MEAN depth so the
   # population curve is on the log-E[count] scale at a representative library size
   # (a constant offset shift, irrelevant to the z-scored heatmap / difference test).
-  if (model == "pseudobulk_nb") newd$log_libsize <- mean(df$log_libsize)
+  if (model %in% PSEUDOBULK_NB_MODELS) newd$log_libsize <- mean(df$log_libsize)
   pred <- predict(fit, newdata = newd, se.fit = TRUE,
                   exclude = excl, newdata.guaranteed = TRUE)
   newd$condition <- factor(as.character(newd$cond_ord),
@@ -643,7 +761,35 @@ fit_trajectory_gam <- function(df, model, gam_k = GAM_K, fs_k = FS_K) {
   newd$ci_lo <- pred$fit - 1.96 * pred$se.fit
   newd$ci_hi <- pred$fit + 1.96 * pred$se.fit
 
-  list(pred = newd, p_shape = p_shape, p_level = p_level, ok = TRUE)
+  # --- Per-sample fitted curves (random effects INCLUDED) --------------------
+  # The population curves above EXCLUDE the sample random effect; here we predict
+  # EACH sample's own trajectory WITH its random deviation (fs curve / re
+  # intercept+slope). Predicted over that sample's observed score range only, so
+  # the per-mouse smooth is interpolated, not extrapolated. Each sample's
+  # condition is fixed (a mouse is either WT or DKO). NB specs predict at the mean
+  # log(library-size) so the per-sample curves share the population curve's scale.
+  # Used for the per-gene per-sample overlay plots; NA-safe if a fit fails.
+  samp_levels <- levels(df$sample)
+  pred_sample <- bind_rows(lapply(samp_levels, function(s) {
+    di <- df[df$sample == s, , drop = FALSE]
+    if (nrow(di) < 2) return(NULL)
+    grid <- seq(min(di$score), max(di$score), length.out = 60)
+    nd <- data.frame(
+      score    = grid,
+      cond_ord = ordered(as.character(di$cond_ord[1]),
+                         levels = c(REFERENCE_CONDITION, TEST_CONDITION)),
+      sample   = factor(s, levels = samp_levels))
+    if (model %in% PSEUDOBULK_NB_MODELS) nd$log_libsize <- mean(df$log_libsize)
+    pr <- tryCatch(as.numeric(predict(fit, newdata = nd, newdata.guaranteed = TRUE)),
+                   error = function(e) rep(NA_real_, nrow(nd)))
+    data.frame(score = grid, sample = s,
+               condition = factor(as.character(di$cond_ord[1]),
+                                  levels = c(REFERENCE_CONDITION, TEST_CONDITION)),
+               fit = pr, stringsAsFactors = FALSE)
+  }))
+
+  list(pred = newd, pred_sample = pred_sample,
+       p_shape = p_shape, p_level = p_level, ok = TRUE)
 }
 
 # =============================================================================
@@ -716,6 +862,22 @@ for (ct in CELLTYPES_TRAJECTORY) {
               sum(ct_condition == REFERENCE_CONDITION),
               sum(ct_condition == TEST_CONDITION)))
 
+  # --- Adaptive N_BINS (optional) --------------------------------------------
+  # Choose N_BINS for THIS cell type as the finest binning the data support (at
+  # most ADAPTIVE_BIN_TOL_K invalid bins; see the ADAPTIVE_N_BINS docs). Reassign
+  # the module-level N_BINS so every downstream make_bins()/make_pseudobulk()/
+  # diagnostic call in this iteration picks it up via their `n_bins = N_BINS`
+  # default. Recomputed at the top of each cell-type iteration.
+  if (ADAPTIVE_N_BINS) {
+    n_sel <- choose_adaptive_nbins(ct_score, ct_sample, ct_condition)
+    write.csv(attr(n_sel, "scan"),
+              file.path(ct_dir, "adaptive_nbins_scan.csv"), row.names = FALSE)
+    cat(sprintf("  Adaptive N_BINS: selected %d bins (tol k=%d, scanned %d-%d, %d valid)\n",
+                n_sel, ADAPTIVE_BIN_TOL_K, ADAPTIVE_N_BINS_MIN, ADAPTIVE_N_BINS_MAX,
+                attr(n_sel, "scan")$n_valid[match(n_sel, attr(n_sel, "scan")$n_bins)]))
+    N_BINS <- as.integer(n_sel)
+  }
+
   # --- Gene selection --------------------------------------------------------
   # TWO distinct sets (reviewer point #5):
   #   test_genes — baseline-expression filter, IDENTICAL to the DESeq2 DE scripts
@@ -759,7 +921,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     geom_vline(xintercept = bininfo$breaks, color = "grey30",
                linetype = "dashed", linewidth = 0.3) +
     labs(x = SCORE_LAB, y = "Cell count",
-         title = sprintf("%s — Score distribution + decile breaks", ct)) +
+         title = sprintf("%s score distribution + decile breaks", ct)) +
     theme_publication()
   ggsave(file.path(diag_dir, "score_histogram_with_bins.pdf"), p_bh, width = 6, height = 4)
 
@@ -786,7 +948,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     scale_fill_manual(values = SAMPLE_COLORS, guide = "none") +
     geom_hline(yintercept = N_BINS, linetype = "dashed", color = "grey40") +
     labs(x = NULL, y = "# bins with enough cells",
-         title = sprintf("%s — Usable bins per sample (max %d)", ct, N_BINS)) +
+         title = sprintf("%s usable bins per sample (max %d)", ct, N_BINS)) +
     theme_publication() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
   ggsave(file.path(diag_dir, "bins_passing_per_sample.pdf"), p_pass, width = 5, height = 4)
@@ -808,7 +970,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     scale_fill_viridis_c(option = "inferno", name = "Z-score") +
     scale_x_continuous(breaks = c(1, N_BINS), labels = c("Low", "High")) +
     labs(x = TRAJ_X_LAB, y = NULL,
-         title = sprintf("%s — Expression along tumor score", ct)) +
+         title = sprintf("%s Expression along tumor score", ct)) +
     theme_publication() + theme(axis.text.y = element_text(size = 7))
   # limitsize = FALSE: height scales with gene count and can exceed ggplot's
   # 50-inch guard at large TOP_N_GENES (e.g. 200 -> 50 in).
@@ -876,7 +1038,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     scale_fill_viridis_c(option = "inferno", name = "Norm.\nexpr", limits = c(0, 1)) +
     scale_x_continuous(expand = c(0, 0)) +
     labs(x = TRAJ_X_LAB, y = NULL,
-         title = sprintf("%s — Normalized expression along tumor gradient", ct)) +
+         title = sprintf("%s Normalized expression along tumor gradient", ct)) +
     theme_publication() +
     theme(axis.text.y = element_text(size = 7))
   ggsave(file.path(ct_dir, "normalized_expression_heatmap.pdf"),
@@ -884,7 +1046,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
          height = max(4, length(plot_genes) * 0.22 + 1), limitsize = FALSE)
 
   # ---------------------------------------------------------------------------
-  # GAM fits — loop over selected models
+  # GAM fits, loop over selected models
   # ---------------------------------------------------------------------------
   # Genes ranked by the pseudobulk shape test; populated when "pseudobulk" runs
   # and used to restrict the single-cell (fs/ranef) fits to the top hits.
@@ -902,7 +1064,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     } else if (!is.null(pseudobulk_top_genes)) {
       genes_this_model <- head(pseudobulk_top_genes, N_GENES_OTHER_MODELS)
     } else {
-      # Pseudobulk not run this session — fall back to the first N test_genes.
+      # Pseudobulk not run this session, fall back to the first N test_genes.
       genes_this_model <- head(test_genes, N_GENES_OTHER_MODELS)
     }
     cat(sprintf("  [%s] fitting %d genes\n", model, length(genes_this_model)))
@@ -960,7 +1122,8 @@ for (ct in CELLTYPES_TRAJECTORY) {
       # Stash the full fitted curve (with CI) + underlying points so the per-gene
       # spline PDFs can be emitted AFTER FDR is known, for the significant genes only.
       if (model %in% PLOT_INDIVIDUAL_GAMS) {
-        plot_store[[gene]] <- list(pred = res$pred, df = df_gam,
+        plot_store[[gene]] <- list(pred = res$pred, pred_sample = res$pred_sample,
+                                   df = df_gam,
                                    p_shape = res$p_shape, p_level = res$p_level)
       }
     }
@@ -993,6 +1156,17 @@ for (ct in CELLTYPES_TRAJECTORY) {
                 else if (model %in% PSEUDOBULK_MODELS)
                   "Mean expression (pseudobulk)" else "Expression"
         xlab_gam <- if (model %in% PSEUDOBULK_MODELS) GAM_X_LAB else TRAJ_X_LAB
+        # Per-sample fitted-curve overlays go in their own subfolder (one file per
+        # gene): WT/DKO population curves + each sample's own random-effect curve.
+        ps_dir <- file.path(gam_dir, "per_sample_curves")
+        dir.create(ps_dir, recursive = TRUE, showWarnings = FALSE)
+        # Combined palette so the single color scale carries BOTH the per-sample
+        # lines (SAMPLE_COLORS) and the two thick population lines (condition colors).
+        pop_keys <- setNames(
+          c(CONDITION_COLORS[[REFERENCE_CONDITION]], CONDITION_COLORS[[TEST_CONDITION]]),
+          c(paste0(REFERENCE_CONDITION, " (fitted mean)"),
+            paste0(TEST_CONDITION, " (fitted mean)")))
+        ps_pal <- c(SAMPLE_COLORS, pop_keys)
         for (gene in sig_genes) {
           st <- plot_store[[gene]]
           subt <- paste(c(
@@ -1009,17 +1183,41 @@ for (ct in CELLTYPES_TRAJECTORY) {
           p_gam <- ggplot(st$pred, aes(x = score, y = fit, color = condition, fill = condition)) +
             geom_ribbon(aes(ymin = ci_lo, ymax = ci_hi), alpha = 0.2, color = NA) +
             geom_line(linewidth = 1) +
-            { if (model %in% PSEUDOBULK_MODELS)
-                geom_point(data = pts_df, aes(x = score, y = expr, color = condition, size = weight),
-                           alpha = 0.5, inherit.aes = FALSE) } +
+            #{ if (model %in% PSEUDOBULK_MODELS)
+            #  geom_point(data = pts_df, aes(x = score, y = expr, color = condition, size = weight),
+            #             alpha = 0.5, inherit.aes = FALSE) 
+            #               } +
             scale_color_manual(values = CONDITION_COLORS) +
             scale_fill_manual(values = CONDITION_COLORS) +
             scale_size_continuous(range = c(1, 4), guide = "none") +
             labs(x = xlab_gam, y = ylab,
-                 title = sprintf("%s — %s [%s]", gene, ct, model),
+                 title = sprintf("%s in %s [%s]", gene, ct, model),
                  subtitle = subt) +
             theme_publication()
           ggsave(file.path(gam_dir, sprintf("gam_%s.pdf", gene)), p_gam, width = 5, height = 4)
+
+          # --- Per-sample fitted-curve overlay -------------------------------
+          # Same fitted model, but showing EACH sample's own trajectory (random
+          # effect included) behind the WT/DKO population means, so the
+          # between-mouse spread the condition test accounts for is visible.
+          ps_df <- st$pred_sample
+          if (!is.null(ps_df) && nrow(ps_df) > 0 && any(is.finite(ps_df$fit))) {
+            pop_df <- st$pred
+            pop_df$key <- factor(paste0(as.character(pop_df$condition), " (fitted mean)"),
+                                 levels = names(pop_keys))
+            p_ps <- ggplot() +
+              geom_line(data = ps_df, aes(x = score, y = fit, color = sample, group = sample),
+                        linewidth = 0.6, alpha = 0.85) +
+              geom_line(data = pop_df, aes(x = score, y = fit, color = key, group = key),
+                        linewidth = 1.7) +
+              scale_color_manual(values = ps_pal, name = NULL) +
+              labs(x = xlab_gam, y = ylab,
+                   title = sprintf("%s in %s [%s] — per-sample fits", gene, ct, model),
+                   subtitle = subt) +
+              theme_publication()
+            ggsave(file.path(ps_dir, sprintf("gam_%s_per_sample.pdf", gene)),
+                   p_ps, width = 5.5, height = 4)
+          }
         }
       }
 
@@ -1103,7 +1301,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
         pdf(file.path(ct_dir, sprintf("trajectory_heatmap_significant_%s.pdf", model)),
             width = 13, height = max(3.5, nrow(z_wt) * 0.13 + 1.5))
         draw(ht_wt + ht_dko + row_ha,
-             column_title = sprintf("%s — significant tumor-proximity trajectories (BH-FDR < %.2f, %d genes)",
+             column_title = sprintf("%s significant tumor-proximity trajectories (BH-FDR < %.2f, %d genes)",
                                     ct, SIG_FDR, nrow(z_wt)),
              column_title_gp = gpar(fontsize = 12, fontface = "bold"))
         dev.off()
@@ -1125,7 +1323,7 @@ for (ct in CELLTYPES_TRAJECTORY) {
     scale_fill_manual(values = CONDITION_COLORS) +
     scale_color_manual(values = CONDITION_COLORS) +
     labs(x = SCORE_LAB, y = "Density of cells",
-         title = sprintf("%s — Position along tumor gradient", ct)) +
+         title = sprintf("%s position along tumor gradient", ct)) +
     theme_publication()
   ggsave(file.path(ct_dir, "density_distribution_along_gradient.pdf"),
          p_dist, width = 5, height = 4)

@@ -2,12 +2,15 @@
 # Spatial visualization of the tumor-proximity trajectory genes (from 15_04).
 #
 # Motivation: 15_04 found genes whose CD8+ T expression trajectory *reshapes* in
-# DKO — flat/low in WT but surging toward the tumor core in DKO (p_shape hits:
-# Nt5e, Bcl2, Icos, Irf1, Gzmb, Prf1, Cd274, Fasl, Il7r, ...). This script shows
+# DKO — flat/low in WT but surging toward the tumor core in DKO. This script shows
 # that in real tissue: T cells colored by expression, overlaid on the tumor mass
 # (grey) as spatial context, one panel per sample (WT samples first, then DKO).
 # A shared per-gene color scale across all panels makes WT-vs-DKO comparable, so
 # the DKO-tumor-core-specific pickup is visible directly.
+#
+# Genes are read from the 15_04 primary-spec (pseudobulk_nb_fs) condition-test CSV
+# and filtered to those significant on EITHER the shape OR the level test
+# (BH-FDR < GENE_FDR), so the plotted set tracks the reported hits automatically.
 #
 # Adapted from 08_01_spatial_masks_08lambda.R.
 
@@ -36,9 +39,21 @@ MASK_CELLTYPE  <- c("CD8+ T")
 TUMOR_CELLTYPE <- "Tumor"          # drawn as grey background context
 SHOW_TUMOR_BACKGROUND <- TRUE      # FALSE = only draw the masked cells
 
-# DKO-tumor-core-surge genes (bottom cluster of the 15_04 significant heatmap).
-GENES <- c("Nt5e", "Bcl2", "Icos", "Irf1", "Gzmb", "Prf1", "Cd274", "Fasl",
-           "Il7r", "Cx3cl1", "Vegfa", "Nfatc1", "Lat2", "Grem1", "Rnf213")
+# Genes to plot: read from the 15_04 condition test and keep those significant on
+# EITHER the shape OR the level test (BH-FDR < GENE_FDR). This tracks the primary
+# spec's hit list directly instead of a hardcoded set — re-run 15_04 and this
+# updates automatically.
+CONDITION_TEST_CSV <- file.path(PROJECT_DIR, "output", "R", "15_tumor_trajectory_working",
+                                "CD8pos_T", "gam_condition_test_pseudobulk_nb_fs.csv")
+GENE_FDR <- 0.1        # keep genes with fdr_shape < GENE_FDR OR fdr_level < GENE_FDR
+
+ct_res <- read.csv(CONDITION_TEST_CSV, stringsAsFactors = FALSE)
+sig_gene <- (!is.na(ct_res$fdr_shape) & ct_res$fdr_shape < GENE_FDR) |
+            (!is.na(ct_res$fdr_level) & ct_res$fdr_level < GENE_FDR)
+GENES <- ct_res$gene[sig_gene]
+cat(sprintf("Read %d genes from %s (FDR < %.2f on shape OR level)\n",
+            length(GENES), basename(CONDITION_TEST_CSV), GENE_FDR))
+if (length(GENES) == 0) stop("No genes passed the FDR cutoff; nothing to plot.")
 
 EXPR_CLIP_Q  <- 0.99   # cap color scale at this quantile (per gene) to tame outliers
 PT_SIZE_MASK <- 1.1    # masked (T) cell point size

@@ -156,8 +156,18 @@ for (domain_name in names(all_dep_results)) {
         next
     }
 
-    # Take top pathways by P.Value (already ordered)
-    sig_paths <- head(sig_paths, TOP_PATHWAYS_PLOT)
+    # Take top 10 up- and top 10 down-regulated pathways by P.Value.
+    # sig_paths is already ordered by P.Value, so head() on each direction
+    # picks the most significant up/down pathways.
+    n_each <- 10
+    up_paths   <- head(sig_paths[sig_paths$logFC > 0, ], n_each)
+    down_paths <- head(sig_paths[sig_paths$logFC < 0, ], n_each)
+    sig_paths  <- rbind(up_paths, down_paths)
+
+    if (nrow(sig_paths) == 0) {
+        cat(sprintf("No up/down significant pathways for domain: %s\n", domain_name))
+        next
+    }
 
     # Use display_name as label; fall back to standard_name if missing
     sig_paths$label <- ifelse(

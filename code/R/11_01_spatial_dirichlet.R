@@ -189,7 +189,6 @@ sig_labels <- results_df %>%
       p.adj < 0.001 ~ "***",
       p.adj < 0.01  ~ "**",
       p.adj < 0.05  ~ "*",
-      p.adj < 0.1   ~ "^",
       TRUE          ~ ""
     ),
     celltype = factor(celltype, levels = CELLTYPES_OF_INTEREST)
@@ -210,7 +209,7 @@ p_box <- ggplot(obs_prop, aes(x = celltype, y = prop, fill = condition)) +
              size = 1.5, alpha = 0.6) +
   scale_fill_manual(values = CONDITION_COLORS) +
   labs(title = "Immune cell proportions: DKO vs WT",
-       subtitle = "Dirichlet regression adj. p-value: *** <0.001, ** <0.01, * <0.05, ^ <0.1",
+       subtitle = "\nDirichlet regression adj. p-value: *** <0.001, ** <0.01, * <0.05",
        x = NULL, y = "Proportion of immune cells") +
   theme_publication() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
@@ -398,7 +397,6 @@ sig_labels_ef <- results_df_ef %>%
       p.adj < 0.001 ~ "***",
       p.adj < 0.01  ~ "**",
       p.adj < 0.05  ~ "*",
-      p.adj < 0.1   ~ "^",
       TRUE          ~ ""
     ),
     celltype = factor(celltype, levels = available_ef)
@@ -418,7 +416,7 @@ p_box_ef <- ggplot(obs_prop_ef, aes(x = celltype, y = prop, fill = condition)) +
              size = 1.5, alpha = 0.6) +
   scale_fill_manual(values = CONDITION_COLORS) +
   labs(title = "Epithelial & fibroblast proportions: DKO vs WT",
-       subtitle = "Dirichlet regression adj. p-value: *** <0.001, ** <0.01, * <0.05, ^ <0.1",
+       subtitle = "\nDirichlet regression adj. p-value: *** <0.001, ** <0.01, * <0.05",
        x = NULL, y = "Proportion") +
   theme_publication() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
@@ -592,7 +590,6 @@ sig_labels_dom <- results_df_dom %>%
       p.adj < 0.001 ~ "***",
       p.adj < 0.01  ~ "**",
       p.adj < 0.05  ~ "*",
-      p.adj < 0.1   ~ "^",
       TRUE          ~ ""
     ),
     domain = factor(domain, levels = DOMAIN_ORDER)
@@ -612,7 +609,7 @@ p_box_dom <- ggplot(obs_prop_dom, aes(x = domain, y = prop, fill = condition)) +
              size = 1.5, alpha = 0.6) +
   scale_fill_manual(values = CONDITION_COLORS) +
   labs(title = "Spatial domain proportions: DKO vs WT",
-       subtitle = "Dirichlet regression adj. p-value: *** <0.001, ** <0.01, * <0.05, ^ <0.1",
+       subtitle = "\nDirichlet regression adj. p-value: *** <0.001, ** <0.01, * <0.05",
        x = NULL, y = "Proportion of cells") +
   theme_publication() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
