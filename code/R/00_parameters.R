@@ -237,6 +237,15 @@ TOP_PATHWAYS_PLOT <- 30        # Number of pathways to display
 PATHWAY_NAME_TRUNC <- 70      # Max characters for pathway names
 # Used in: 12, 13
 
+# Pathway modules (EnrichmentMap-style grouping of pathways that share genes)
+PATHWAY_SIM_METHOD     <- "overlap"  # Gene-set similarity: "jaccard", "overlap", or "combined"
+PATHWAY_SIM_COMBINED_K <- 0.5        # Jaccard weight when PATHWAY_SIM_METHOD = "combined"
+PATHWAY_SIM_THRESHOLD  <-  0.60    # Min average similarity for pathways to share a module
+PATHWAY_MODULE_LINKAGE <- "average"  # hclust linkage used to build modules
+MODULE_CORE_GENE_FRAC  <- 0.2        # Core genes: in MORE than this fraction of a module's significant pathways
+MODULE_CORE_GENE_MIN_N <- 2          # ... and in at least this many of the module's significant pathways
+# Used in: 12_pathway_activity.R
+
 # ------------------------------------------------------------------------------
 # 13. VISUALIZATION DEFAULTS
 # ------------------------------------------------------------------------------
