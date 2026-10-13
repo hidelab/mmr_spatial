@@ -23,6 +23,8 @@ source("./code/R/00_parameters.R")
 source(file.path(PROJECT_DIR, "code", "R", "00_utils.R"))
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
 
+FDR_THRESHOLD <- 0.1
+
 # Pathway gene membership and display names
 pathways2 <- readRDS(MSIGDB_PATHWAYS)
 displayNames <- read.csv(MSIGDB_NAMES)[, c("standard_name", "display_name")]
@@ -234,7 +236,7 @@ for (pb_file in pseudobulk_files) {
         n_per_module <- table(dir_paths$module)
         dir_paths <- dir_paths[dir_paths$module %in% names(n_per_module)[n_per_module >= 3], ]
         if (nrow(dir_paths) == 0) next
-        for (colored in c(FALSE, TRUE)) {
+        for (colored in c(FALSE)) {
             plot_pathway_barplot(
                 dir_paths, paste0(module_dirs[[dir]][[2]], domain_label),
                 domain_file(domain_name, paste0("_module_", dir, "_pathways_barplot", if (colored) "_colored" else "")),
