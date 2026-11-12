@@ -3,10 +3,14 @@
 #
 # Motivation: 15_04 found genes whose CD8+ T expression trajectory *reshapes* in
 # DKO — flat/low in WT but surging toward the tumor core in DKO. This script shows
-# that in real tissue: T cells colored by expression, overlaid on the tumor mass
-# (grey) as spatial context, one panel per sample (WT samples first, then DKO).
-# A shared per-gene color scale across all panels makes WT-vs-DKO comparable, so
-# the DKO-tumor-core-specific pickup is visible directly.
+# that in real tissue. Each gene's figure has one column per sample (WT samples
+# first, then DKO) and three rows:
+#   1. tumor cells only, highlighted in a single color (tissue context)
+#   2. CD8+ T cells only, colored by expression
+#   3. overlay: tumor cells underneath, CD8+ T cells on top
+# The CD8+ T color scale is shared across all samples, so WT-vs-DKO is directly
+# comparable. Violin plots of the same genes in CD8+ T cells (one violin per
+# sample, filled by condition) go to the violin_plots/ subfolder.
 #
 # Genes are read from the 15_04 primary-spec (pseudobulk_nb_fs) condition-test CSV
 # and filtered to those significant on EITHER the shape OR the level test
@@ -36,8 +40,8 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 # Cell type(s) to color by expression. The 15_04 trajectory was on CD8+ T; add
 # "Treg" / "NK" here to include more T/lymphoid populations.
 MASK_CELLTYPE  <- c("CD8+ T")
-TUMOR_CELLTYPE <- "Tumor"          # drawn as grey background context
-SHOW_TUMOR_BACKGROUND <- TRUE      # FALSE = only draw the masked cells
+TUMOR_CELLTYPE <- "Tumor"
+TUMOR_COLOR    <- "#08519C"   # tumor cells (context only, not expression)
 
 # Genes to plot: read from the 15_04 condition test and keep those significant on
 # EITHER the shape OR the level test (BH-FDR < GENE_FDR). This tracks the primary
@@ -57,7 +61,7 @@ if (length(GENES) == 0) stop("No genes passed the FDR cutoff; nothing to plot.")
 
 EXPR_CLIP_Q  <- 0.99   # cap color scale at this quantile (per gene) to tame outliers
 PT_SIZE_MASK <- 1.1    # masked (T) cell point size
-PT_SIZE_BG   <- 0.25   # tumor background point size
+PT_SIZE_BG   <- 0.25   # tumor cell point size
 
 # =============================================================================
 # Load merged-domain Seurat object
@@ -106,8 +110,19 @@ center_coords <- function(idx) {
   cbind(x = x - mean(range(x)), y = y - mean(range(y)))
 }
 
+mask_label  <- paste(MASK_CELLTYPE, collapse = " + ")
+panel_frame <- list(
+  coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span)),
+  theme_void(),
+  theme(plot.title = element_text(hjust = 0.5, size = 10), legend.position = "right")
+)
+row_label <- function(label) {
+  ggplot() + annotate("text", x = 0, y = 0, label = label, angle = 90,
+                      fontface = "bold", size = 4.5) + theme_void()
+}
+
 # =============================================================================
-# One panel per sample; grey tumor background + masked cells colored by gene
+# Per gene: rows = tumor only / CD8+ T only / overlay; one column per sample
 # =============================================================================
 for (gene in available_genes) {
   cat(sprintf("  %s ...\n", gene))
@@ -118,45 +133,127 @@ for (gene in available_genes) {
   hi <- as.numeric(quantile(mask_vals[mask_vals > 0], EXPR_CLIP_Q, na.rm = TRUE))
   if (!is.finite(hi) || hi <= 0) hi <- max(mask_vals, na.rm = TRUE)
   if (!is.finite(hi) || hi <= 0) hi <- 1
-  lims <- c(0, hi)
+  mask_scale <- scale_color_viridis(option = "inferno", name = paste0(mask_label, "\n", gene),
+                                    limits = c(0, hi), oob = scales::squish)
 
-  plots <- lapply(sample_ids, function(s) {
-    s_idx <- which(samples == s)
-    cc    <- center_coords(s_idx)
-    m_bg  <- is_tumor[s_idx]
-    m_fg  <- is_mask[s_idx]
+  panels <- lapply(sample_ids, function(s) {
+    s_idx  <- which(samples == s)
+    cc     <- center_coords(s_idx)
+    m_tum  <- is_tumor[s_idx]
+    m_msk  <- is_mask[s_idx]
+    df_tum <- data.frame(x = cc[m_tum, 1], y = cc[m_tum, 2])
+    df_msk <- data.frame(x = cc[m_msk, 1], y = cc[m_msk, 2], expr = pmin(gvec[s_idx][m_msk], hi))
+    df_msk <- df_msk[order(df_msk$expr), ]   # draw high-expressers on top
+    title  <- sprintf("%s (%s)", s, unique(as.character(seu$condition[s_idx])))
 
-    df_bg <- data.frame(x = cc[m_bg, 1], y = cc[m_bg, 2])
-    df_fg <- data.frame(x = cc[m_fg, 1], y = cc[m_fg, 2],
-                        expr = pmin(gvec[s_idx][m_fg], hi))
-    df_fg <- df_fg[order(df_fg$expr), ]   # draw high-expressers on top
+    tumor_layer <- geom_point(data = df_tum, aes(x, y), color = TUMOR_COLOR,
+                              size = PT_SIZE_BG, alpha = 0.5)
+    mask_layer  <- geom_point(data = df_msk, aes(x, y, color = expr), size = PT_SIZE_MASK, alpha = 0.9)
 
-    p <- ggplot()
-    if (SHOW_TUMOR_BACKGROUND && nrow(df_bg) > 0)
-      p <- p + geom_point(data = df_bg, aes(x, y), color = "grey80",
-                          size = PT_SIZE_BG, alpha = 0.5)
-    p <- p +
-      geom_point(data = df_fg, aes(x, y, color = expr), size = PT_SIZE_MASK, alpha = 0.9) +
-      scale_color_viridis(option = "inferno", name = gene, limits = lims,
-                          oob = scales::squish) +
-      coord_fixed(xlim = c(-half_span, half_span), ylim = c(-half_span, half_span)) +
-      ggtitle(sprintf("%s (%s)", s, unique(as.character(seu$condition[s_idx])))) +
-      theme_void() +
-      theme(plot.title = element_text(hjust = 0.5, size = 10),
-            legend.position = "right")
-    p
+    list(
+      tumor   = ggplot() + tumor_layer + ggtitle(title) + panel_frame,
+      mask    = ggplot() + mask_layer + mask_scale + panel_frame,
+      overlay = ggplot() + tumor_layer + mask_layer + mask_scale + panel_frame
+    )
   })
 
-  p_all <- wrap_plots(plots, nrow = 1, guides = "collect") +
+  rows <- c(tumor = paste(TUMOR_CELLTYPE, "cells"), mask = paste(mask_label, "cells"),
+            overlay = "Overlay")
+  grid <- unlist(lapply(names(rows), function(r) {
+    c(list(row_label(rows[[r]])), lapply(panels, `[[`, r))
+  }), recursive = FALSE)
+
+  p_all <- wrap_plots(grid, ncol = length(sample_ids) + 1,
+                      widths = c(0.15, rep(1, length(sample_ids))), guides = "collect") +
     plot_annotation(
-      title = sprintf("%s — %s (grey = %s)", gene,
-                      paste(MASK_CELLTYPE, collapse = ", "), TUMOR_CELLTYPE),
+      title = sprintf("%s in %s and %s cells", gene, TUMOR_CELLTYPE, mask_label),
       theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)))
 
-  ggsave(file.path(OUTPUT_DIR, paste0("spatial_", gene, ".pdf")),
-         p_all, width = 3.6 * length(sample_ids), height = 4.5)
-  ggsave(file.path(OUTPUT_DIR, paste0("spatial_", gene, ".png")),
-         p_all, width = 3.6 * length(sample_ids), height = 4.5, dpi = 300)
+  fig_w <- 3.6 * length(sample_ids) + 1.5
+  fig_h <- 3 * 4.2
+  ggsave(file.path(OUTPUT_DIR, paste0("spatial_", gene, ".pdf")), p_all, width = fig_w, height = fig_h)
+  ggsave(file.path(OUTPUT_DIR, paste0("spatial_", gene, ".png")), p_all, width = fig_w, height = fig_h, dpi = 300)
 }
+
+# =============================================================================
+# Violin plots: expression in CD8+ T cells, one violin per sample
+# =============================================================================
+VIOLIN_DIR <- file.path(OUTPUT_DIR, "violin_plots")
+dir.create(VIOLIN_DIR, recursive = TRUE, showWarnings = FALSE)
+
+mask_idx <- which(is_mask)
+vln_df <- data.frame(
+  sample    = factor(as.character(samples[mask_idx]), levels = sample_ids),
+  condition = factor(as.character(seu$condition[mask_idx]),
+                     levels = c(REFERENCE_CONDITION, TEST_CONDITION))
+)
+
+violin_layers <- list(
+  geom_violin(scale = "width", trim = TRUE, linewidth = 0.3, alpha = 0.8),
+  stat_summary(fun = median, geom = "point", size = 1.2, color = "black", show.legend = FALSE),
+  scale_fill_manual(values = CONDITION_COLORS, name = NULL),
+  labs(x = NULL, y = "Log-normalized expression"),
+  theme_publication(),
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+)
+
+cat("Violin plots...\n")
+for (gene in available_genes) {
+  vln_df$expr <- as.numeric(expr_layer[gene, mask_idx])
+  p_vln <- ggplot(vln_df, aes(x = sample, y = expr, fill = condition)) +
+    violin_layers +
+    ggtitle(sprintf("%s in %s cells", gene, mask_label))
+  ggsave(file.path(VIOLIN_DIR, paste0("violin_", gene, ".pdf")), p_vln, width = 5, height = 4)
+  ggsave(file.path(VIOLIN_DIR, paste0("violin_", gene, ".png")), p_vln, width = 5, height = 4, dpi = 300)
+}
+
+# All genes in one panel (free y-scales)
+vln_all <- do.call(rbind, lapply(available_genes, function(gene) {
+  cbind(vln_df[, c("sample", "condition")], gene = gene,
+        expr = as.numeric(expr_layer[gene, mask_idx]))
+}))
+vln_all$gene <- factor(vln_all$gene, levels = available_genes)
+p_vln_all <- ggplot(vln_all, aes(x = sample, y = expr, fill = condition)) +
+  violin_layers +
+  facet_wrap(~ gene, scales = "free_y", ncol = PANEL_NCOL) +
+  ggtitle(sprintf("Trajectory genes in %s cells", mask_label))
+vln_h <- ceiling(length(available_genes) / PANEL_NCOL) * 3
+ggsave(file.path(VIOLIN_DIR, "violin_all_genes.pdf"), p_vln_all, width = 16, height = vln_h,
+       limitsize = FALSE)
+ggsave(file.path(VIOLIN_DIR, "violin_all_genes.png"), p_vln_all, width = 16, height = vln_h,
+       dpi = 300, limitsize = FALSE)
+
+# =============================================================================
+# Dot plot: all genes x condition (WT | DKO) in CD8+ T cells
+# =============================================================================
+# % expressing (expr > 0) and mean log-normalized expression are computed per
+# tumour and then averaged within condition, so each tumour counts equally
+# rather than tumours with more CD8+ T cells dominating.
+vln_all$expressed <- vln_all$expr > 0
+per_tumour <- aggregate(cbind(pct_expressing = expressed * 100, mean_expression = expr) ~
+                          gene + condition + sample, data = vln_all, FUN = mean)
+dot_df <- aggregate(cbind(pct_expressing, mean_expression) ~ gene + condition,
+                    data = per_tumour, FUN = mean)
+dot_df$n_tumours <- aggregate(sample ~ gene + condition, data = per_tumour, FUN = length)$sample
+write.csv(dot_df[order(dot_df$gene, dot_df$condition), ],
+          file.path(VIOLIN_DIR, "dotplot_values.csv"), row.names = FALSE)
+
+# Order genes by the DKO - WT difference in % expressing (higher in DKO on top)
+pct_wide  <- tapply(dot_df$pct_expressing, list(dot_df$gene, dot_df$condition), mean)
+pct_diff  <- pct_wide[, TEST_CONDITION] - pct_wide[, REFERENCE_CONDITION]
+dot_df$gene <- factor(dot_df$gene, levels = names(sort(pct_diff)))
+
+p_dot <- ggplot(dot_df, aes(x = condition, y = gene, size = pct_expressing, color = mean_expression)) +
+  geom_point() +
+  scale_size_area(max_size = 7, name = "% expressing") +
+  scale_color_viridis(option = "inferno", end = 0.9, name = "Mean log-norm.\nexpression") +
+  labs(x = NULL, y = NULL, title = sprintf("Trajectory genes in %s cells", mask_label),
+       subtitle = "Per-tumour values averaged within condition") +
+  theme_publication() +
+  theme(axis.text.y = element_text(face = "italic"),
+        panel.grid.major = element_line(color = "grey92", linewidth = 0.3))
+dot_h <- 0.22 * length(available_genes) + 1.8
+ggsave(file.path(VIOLIN_DIR, "dotplot_all_genes.pdf"), p_dot, width = 5, height = dot_h)
+ggsave(file.path(VIOLIN_DIR, "dotplot_all_genes.png"), p_dot, width = 5, height = dot_h, dpi = 300)
 
 cat("Done. Plots saved to:", OUTPUT_DIR, "\n")

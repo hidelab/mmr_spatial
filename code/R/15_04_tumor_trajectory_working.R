@@ -1277,34 +1277,52 @@ for (ct in CELLTYPES_TRAJECTORY) {
           annotation_legend_param = list(class = list(title = "Sig. in")),
           width = unit(3, "cm"))
 
+        # Gradient-axis labels drawn horizontally in a strip BELOW each heatmap
+        # body, left-/right-aligned to its edges so they never overlap the cells.
         col_note <- HeatmapAnnotation(
-          axis = anno_text(c("periphery", rep("", ng - 2), "tumor core"),
-                           gp = gpar(fontsize = 7), just = "center"),
+          axis = AnnotationFunction(
+            fun = function(index, k, n) {
+              grid.text("periphery",  x = unit(0, "npc"), just = "left",  gp = gpar(fontsize = 7))
+              grid.text("tumor core", x = unit(1, "npc"), just = "right", gp = gpar(fontsize = 7))
+            },
+            which = "column", n = ng, height = unit(4, "mm"), subsettable = FALSE),
           show_annotation_name = FALSE)
 
-        ht_wt <- Heatmap(z_wt, cluster_rows = cluster_rows_arg, cluster_columns = FALSE,
-                         col = col_fun, name = "Fitted\nz-score",
-                         column_title = REFERENCE_CONDITION,
-                         show_column_names = FALSE, row_names_side = "left",
-                         row_dend_side = "left", show_row_dend = TRUE,
-                         row_dend_width = unit(0.8, "cm"),
-                         row_names_gp = gpar(fontsize = 7, fontface = "italic"),
-                         bottom_annotation = col_note,
-                         width = unit(6.5, "cm"), border = TRUE)
-        ht_dko <- Heatmap(z_dko, cluster_rows = FALSE, cluster_columns = FALSE,
-                          col = col_fun, name = " ", column_title = TEST_CONDITION,
-                          show_column_names = FALSE, show_row_names = FALSE,
-                          bottom_annotation = col_note,
-                          width = unit(6.5, "cm"), border = TRUE,
-                          show_heatmap_legend = FALSE)
+        # WT | DKO heatmap pair. Rows keep the clustered order either way;
+        # show_dend only controls whether the dendrogram is drawn.
+        traj_heatmaps <- function(show_dend) {
+          ht_wt <- Heatmap(z_wt, cluster_rows = cluster_rows_arg, cluster_columns = FALSE,
+                           col = col_fun, name = "Fitted\nz-score",
+                           column_title = REFERENCE_CONDITION,
+                           show_column_names = FALSE, row_names_side = "left",
+                           row_dend_side = "left", show_row_dend = show_dend,
+                           row_dend_width = unit(0.8, "cm"),
+                           row_names_gp = gpar(fontsize = 7, fontface = "italic"),
+                           bottom_annotation = col_note,
+                           width = unit(6.5, "cm"), border = TRUE)
+          ht_dko <- Heatmap(z_dko, cluster_rows = FALSE, cluster_columns = FALSE,
+                            col = col_fun, name = " ", column_title = TEST_CONDITION,
+                            show_column_names = FALSE, show_row_names = FALSE,
+                            bottom_annotation = col_note,
+                            width = unit(6.5, "cm"), border = TRUE,
+                            show_heatmap_legend = FALSE)
+          ht_wt + ht_dko
+        }
+        draw_traj <- function(ht_list, file, width) {
+          pdf(file.path(ct_dir, file), width = width, height = max(3.5, nrow(z_wt) * 0.13 + 1.5))
+          draw(ht_list,
+               column_title = sprintf("%s significant tumor-proximity trajectories (BH-FDR < %.2f, %d genes)",
+                                      ct, SIG_FDR, nrow(z_wt)),
+               column_title_gp = gpar(fontsize = 12, fontface = "bold"))
+          dev.off()
+        }
 
-        pdf(file.path(ct_dir, sprintf("trajectory_heatmap_significant_%s.pdf", model)),
-            width = 13, height = max(3.5, nrow(z_wt) * 0.13 + 1.5))
-        draw(ht_wt + ht_dko + row_ha,
-             column_title = sprintf("%s significant tumor-proximity trajectories (BH-FDR < %.2f, %d genes)",
-                                    ct, SIG_FDR, nrow(z_wt)),
-             column_title_gp = gpar(fontsize = 12, fontface = "bold"))
-        dev.off()
+        # Full version (dendrogram + significance class + FDR bars) and a clean
+        # version with only the two heatmaps (same row order).
+        draw_traj(traj_heatmaps(show_dend = TRUE) + row_ha,
+                  sprintf("trajectory_heatmap_significant_%s.pdf", model), width = 13)
+        draw_traj(traj_heatmaps(show_dend = FALSE),
+                  sprintf("trajectory_heatmap_significant_%s_clean.pdf", model), width = 10)
         cat(sprintf("  [%s] significant-trajectory heatmap: %d genes (%d shape, %d level, %d both)\n",
                     model, nrow(z_wt), sum(category == "shape"),
                     sum(category == "level"), sum(category == "both")))
