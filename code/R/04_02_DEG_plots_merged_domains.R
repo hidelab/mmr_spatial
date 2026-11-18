@@ -54,7 +54,7 @@ for (dom in names(all_results)) {
     head(VOLCANO_TOP_N)
 
   p <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = significance)) +
-    geom_point(alpha = 0.5, size = 0.8) +
+    geom_point(alpha = 0.5, size = 1.2) +
     scale_color_manual(values = c("Up in DKO" = "#D73027",
                                   "Down in DKO" = "#4575B4",
                                   "NS" = "grey60")) +
@@ -64,9 +64,9 @@ for (dom in names(all_results)) {
                linetype = "dashed", color = "grey40") +
     geom_text_repel(data = top_genes,
                     aes(label = gene),
-                    size = 2.5, max.overlaps = 15,
+                    size = 4, max.overlaps = 15,
                     color = "black") +
-    labs(title = paste0("DKO vs WT in Domain ", dom, " (", gsub("_", " ", dom_name), ")"),
+    labs(title = paste0("DKO vs WT in ", gsub("_", " ", dom_name)),
          x = "Log2 Fold Change (DKO / WT)",
          y = "-log10(adjusted p-value)",
          color = NULL) +

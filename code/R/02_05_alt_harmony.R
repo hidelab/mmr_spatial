@@ -161,7 +161,7 @@ merge_and_score <- function(emb, clusters, samples, conditions, label) {
 # --- 1. Load object (read-only) ------------------------------------------------
 seu <- readRDS(file.path(PROJECT_DIR, "output", "R", "DKO_banksy_merged.rds"))
 cat("Loaded:", ncol(seu), "cells\n")
-stopifnot(all(c("pca", "harmony") %in% Reductions(seu)))
+stopifnot(all(c("pca", "harmony", "spatial") %in% Reductions(seu)))
 seu$condition <- gsub("^KO$", TEST_CONDITION, seu$condition)
 cat(sprintf("Stored PCA: %d components; stored Harmony: %d components\n",
             ncol(Embeddings(seu, "pca")), ncol(Embeddings(seu, "harmony"))))
@@ -170,6 +170,7 @@ clusters_current <- seu@meta.data[[DOMAIN_SOURCE_COL]]
 domains_current  <- as.character(seu@meta.data[[COL_DOMAIN]])
 samples_all      <- as.character(seu$sample)
 cond_all         <- as.character(seu$condition)
+coords           <- Embeddings(seu, "spatial")
 
 # --- 2. Re-run Harmony and clustering ------------------------------------------
 # Same settings as 02_01 (seed, batch variable, SNN on 30 components, resolution);
@@ -177,7 +178,7 @@ cond_all         <- as.character(seu$condition)
 rerun_pipeline <- function(npcs, name) {
   set.seed(42)
   seu <- RunHarmony(seu, group.by.vars = HARMONY_GROUP_VAR, reduction.use = "pca",
-                    dims.use = seq_len(npcs), reduction.save = paste0("harmony_", name))
+                    dims.use = seq_len(npcs), reduction.save = paste0("harmony_", name), nclust = 8)
   set.seed(42)
   seu <- FindNeighbors(seu, reduction = paste0("harmony_", name), dims = 1:BANKSY_NPC_USE,
                        graph.name = paste0(name, c("_nn", "_snn")))
@@ -283,5 +284,28 @@ p_cross <- crosstab %>%
   labs(x = sprintf("Variant domain (k = %d)", MERGE_K), y = "Current domain (02_03)") +
   theme_publication()
 ggsave(file.path(OUTPUT_DIR, "domain_crosstab_vs_current.pdf"), p_cross, width = 12, height = 4)
+
+# Spatial maps of the k = MERGE_K domains, one row per variant. Each variant
+# domain is matched to the current domain holding most of its cells and takes
+# that domain's colour when the matching is one-to-one.
+spatial_row <- function(v) {
+  dom   <- as.character(variants[[v]]$domain_cells)
+  tab   <- table(dom, current_names)
+  match <- setNames(colnames(tab)[apply(tab, 1, which.max)], rownames(tab))
+  cols  <- if (!any(duplicated(match))) setNames(DOMAIN_COLORS[match], names(match))
+           else setNames(c("#1B9E77", "#D95F02", "#7570B3", "#E7298A")[seq_along(match)], names(match))
+  labs  <- setNames(sprintf("D%s (~%s)", names(match), match), names(match))
+  data.frame(x = coords[, 1], y = coords[, 2], domain = dom,
+             sample = factor(samples_all, levels = intersect(names(SAMPLE_COLORS), unique(samples_all)))) %>%
+    ggplot(aes(x, y, color = domain)) +
+    geom_point(size = 0.2, stroke = 0) +
+    scale_color_manual(values = cols, labels = labs, name = v) +
+    facet_wrap(~ sample, nrow = 1) + coord_fixed() + theme_void() +
+    guides(color = guide_legend(override.aes = list(size = 3)))
+}
+p_spatial <- wrap_plots(lapply(names(variants), spatial_row), ncol = 1) +
+  plot_annotation(title = sprintf("Merged domains (k = %d) by Harmony variant", MERGE_K))
+ggsave(file.path(OUTPUT_DIR, "spatial_domains_by_variant.png"), p_spatial,
+       width = 24, height = 4 * length(variants), dpi = 200)
 
 cat("Outputs saved to:", OUTPUT_DIR, "\n")

@@ -228,8 +228,8 @@ for (pb_file in pseudobulk_files) {
     # significant pathways in that direction, labelled with core genes. Each comes in
     # two versions: plain gene names, and gene names coloured by DEG direction.
     module_dirs <- list(
-        up   = list(up_sig,   "Upregulated Modules with 2+ Significant Pathways, "),
-        down = list(down_sig, "Downregulated Modules with 2+ Significant Pathways, ")
+        up   = list(up_sig,   "Upregulated in DKO grouped by common functional themes and shared genes, "),
+        down = list(down_sig, "Downregulated in DKO grouped by common functional themes and shared genes, ")
     )
     for (dir in names(module_dirs)) {
         dir_paths <- module_dirs[[dir]][[1]]

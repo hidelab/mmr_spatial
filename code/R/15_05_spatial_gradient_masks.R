@@ -26,13 +26,9 @@ Sys.setenv(OMP_NUM_THREADS = N_THREADS, MKL_NUM_THREADS = N_THREADS,
 library(Seurat)
 library(ggplot2)
 library(patchwork)
-library(viridis)
 
 source("./code/R/00_parameters.R")
 source(file.path(PROJECT_DIR, "code", "R", "00_color_palette.R"))
-
-OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "15_spatial_gradient_masks")
-dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # =============================================================================
 # Parameters (modifiable)
@@ -41,7 +37,9 @@ dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
 # "Treg" / "NK" here to include more T/lymphoid populations.
 MASK_CELLTYPE  <- c("CD8+ T")
 TUMOR_CELLTYPE <- "Tumor"
-TUMOR_COLOR    <- "#08519C"   # tumor cells (context only, not expression)
+TUMOR_COLOR    <- TIER1_COLORS[["Tumor"]]   # tumor cells (context only, not expression)
+# CD8+ T expression gradient: light blue (low) -> dark blue (high)
+CD8_GRADIENT   <- c("#9ECAE1", "#08306B")
 
 # Genes to plot: read from the 15_04 condition test and keep those significant on
 # EITHER the shape OR the level test (BH-FDR < GENE_FDR). This tracks the primary
@@ -60,8 +58,19 @@ cat(sprintf("Read %d genes from %s (FDR < %.2f on shape OR level)\n",
 if (length(GENES) == 0) stop("No genes passed the FDR cutoff; nothing to plot.")
 
 EXPR_CLIP_Q  <- 0.99   # cap color scale at this quantile (per gene) to tame outliers
-PT_SIZE_MASK <- 1.1    # masked (T) cell point size
-PT_SIZE_BG   <- 0.25   # tumor cell point size
+PT_SIZE_MASK <- 0.8    # masked (T) cell point size
+PT_SIZE_BG   <- 0.2    # tumor cell point size
+
+# Selected-samples figure (PNG only, in selected/): one row per sample,
+# columns = tumor / CD8+ T expression / overlay
+SELECTED_SAMPLES <- c("WT1", "DKO4")
+
+# Outputs go in a subfolder named after the mask cell type(s), e.g. CD8pos_T/
+mask_dir_name <- paste(gsub("[^A-Za-z0-9_]", "_", gsub("\\+", "pos", MASK_CELLTYPE)), collapse = "_")
+OUTPUT_DIR <- file.path(PROJECT_DIR, "output", "R", "15_spatial_gradient_masks", mask_dir_name)
+dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+SELECTED_DIR <- file.path(OUTPUT_DIR, "selected")
+dir.create(SELECTED_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # =============================================================================
 # Load merged-domain Seurat object
@@ -133,8 +142,9 @@ for (gene in available_genes) {
   hi <- as.numeric(quantile(mask_vals[mask_vals > 0], EXPR_CLIP_Q, na.rm = TRUE))
   if (!is.finite(hi) || hi <= 0) hi <- max(mask_vals, na.rm = TRUE)
   if (!is.finite(hi) || hi <= 0) hi <- 1
-  mask_scale <- scale_color_viridis(option = "inferno", name = paste0(mask_label, "\n", gene),
-                                    limits = c(0, hi), oob = scales::squish)
+  mask_scale <- scale_color_gradient(low = CD8_GRADIENT[1], high = CD8_GRADIENT[2],
+                                     name = paste0(mask_label, "\n", gene),
+                                     limits = c(0, hi), oob = scales::squish)
 
   panels <- lapply(sample_ids, function(s) {
     s_idx  <- which(samples == s)
@@ -156,6 +166,7 @@ for (gene in available_genes) {
       overlay = ggplot() + tumor_layer + mask_layer + mask_scale + panel_frame
     )
   })
+  names(panels) <- sample_ids
 
   rows <- c(tumor = paste(TUMOR_CELLTYPE, "cells"), mask = paste(mask_label, "cells"),
             overlay = "Overlay")
@@ -173,6 +184,26 @@ for (gene in available_genes) {
   fig_h <- 3 * 4.2
   ggsave(file.path(OUTPUT_DIR, paste0("spatial_", gene, ".pdf")), p_all, width = fig_w, height = fig_h)
   ggsave(file.path(OUTPUT_DIR, paste0("spatial_", gene, ".png")), p_all, width = fig_w, height = fig_h, dpi = 300)
+
+  # Selected samples: rows = samples, columns = tumor / CD8+ T / overlay.
+  # Same color limits as the full figure, so the two are directly comparable.
+  sel <- intersect(SELECTED_SAMPLES, sample_ids)
+  if (length(sel) > 0) {
+    sel_grid <- unlist(lapply(sel, function(s) {
+      s_label <- sprintf("%s (%s)", s, unique(as.character(seu$condition[samples == s])))
+      c(list(row_label(s_label)),
+        lapply(names(rows), function(r) panels[[s]][[r]] + labs(title = if (s == sel[1]) rows[[r]] else NULL)))
+    }), recursive = FALSE)
+
+    p_sel <- wrap_plots(sel_grid, ncol = length(rows) + 1,
+                        widths = c(0.15, rep(1, length(rows))), guides = "collect") +
+      plot_annotation(
+        title = sprintf("%s in %s and %s cells", gene, TUMOR_CELLTYPE, mask_label),
+        theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5)))
+
+    ggsave(file.path(SELECTED_DIR, paste0("spatial_", gene, ".png")), p_sel,
+           width = 3.6 * length(rows) + 1.5, height = 4.2 * length(sel), dpi = 300)
+  }
 }
 
 # =============================================================================
@@ -246,7 +277,8 @@ dot_df$gene <- factor(dot_df$gene, levels = names(sort(pct_diff)))
 p_dot <- ggplot(dot_df, aes(x = condition, y = gene, size = pct_expressing, color = mean_expression)) +
   geom_point() +
   scale_size_area(max_size = 7, name = "% expressing") +
-  scale_color_viridis(option = "inferno", end = 0.9, name = "Mean log-norm.\nexpression") +
+  scale_color_gradient(low = CD8_GRADIENT[1], high = CD8_GRADIENT[2],
+                       name = "Mean log-norm.\nexpression") +
   labs(x = NULL, y = NULL, title = sprintf("Trajectory genes in %s cells", mask_label),
        subtitle = "Per-tumour values averaged within condition") +
   theme_publication() +

@@ -1140,7 +1140,8 @@ plot_module_network <- function(sim, sig_df, threshold, fdr, sim_label, domain_n
     sub_sim * (sub_sim >= threshold),
     mode = "undirected", weighted = TRUE, diag = FALSE
   )
-  igraph::V(g)$logFC <- sig_df$logFC
+  igraph::V(g)$direction <- factor(ifelse(sig_df$logFC > 0, "Upregulated", "Downregulated"),
+                                 levels = c("Upregulated", "Downregulated"))
   igraph::V(g)$n_genes <- sig_df$n_genes
   igraph::V(g)$module <- sig_df$module
   lay <- ggraph::create_layout(g, layout = "stress")
@@ -1163,9 +1164,8 @@ plot_module_network <- function(sim, sig_df, threshold, fdr, sim_label, domain_n
       ggraph::scale_edge_width(range = c(0.2, 1.5), name = sim_label)
   }
   p <- p +
-    ggraph::geom_node_point(aes(fill = logFC, size = n_genes), shape = 21, colour = "grey30", stroke = 0.3) +
-    scale_fill_gradient2(low = "#1565C0", mid = "white", high = "#C62828", midpoint = 0,
-                         name = "Effect\nsize") +
+    ggraph::geom_node_point(aes(fill = direction, size = n_genes), shape = 21, colour = "grey30", stroke = 0.3) +
+    scale_fill_manual(values = c(Upregulated = "#C62828", Downregulated = "#1565C0"), name = NULL) +
     scale_size_continuous(range = c(1.5, 6), name = "Genes")
   if (nrow(centroids) > 0) {
     p <- p + ggrepel::geom_label_repel(
@@ -1211,6 +1211,8 @@ plot_pathway_barplot <- function(paths, title, out_stem, module_rule,
   # Readable, truncated pathway names; signed -log10 p-value: sign(logFC) * -log10(P.Value)
   paths$label <- truncate_label(pathway_label(paths$standard_name, paths$display_name), name_trunc)
   paths$signed_neg_log_p <- sign(paths$logFC) * (-log10(paths$P.Value))
+  paths$direction <- factor(ifelse(paths$logFC > 0, "Upregulated", "Downregulated"),
+                            levels = c("Upregulated", "Downregulated"))
 
   # Order module blocks by the mean signed -log10 p-value of their plotted
   # pathways (top = most up), and pathways within a block by their own value.
@@ -1261,13 +1263,12 @@ plot_pathway_barplot <- function(paths, title, out_stem, module_rule,
   }
 
   # switch = "y" puts the block labels on the left; pathway names go on the right axis
-  p <- ggplot(paths, aes(x = signed_neg_log_p, y = label, fill = logFC)) +
+  p <- ggplot(paths, aes(x = signed_neg_log_p, y = label, fill = direction)) +
     geom_col(width = 0.8, orientation = "y") +
     facet_grid(rows = vars(module_f), scales = "free_y", space = "free_y", switch = "y",
                labeller = as_labeller(strip_labels)) +
     scale_y_discrete(position = "right") +
-    scale_fill_gradient2(low = "#1565C0", mid = "white", high = "#C62828", midpoint = 0,
-                         name = "Effect\nsize") +
+    scale_fill_manual(values = c(Upregulated = "#C62828", Downregulated = "#1565C0"), name = NULL) +
     labs(
       title = title,
       x = "Signed -log10(P-value)",

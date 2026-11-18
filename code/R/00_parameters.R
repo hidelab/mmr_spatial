@@ -242,7 +242,7 @@ PATHWAY_SIM_METHOD     <- "overlap"  # Gene-set similarity: "jaccard", "overlap"
 PATHWAY_SIM_COMBINED_K <- 0.5        # Jaccard weight when PATHWAY_SIM_METHOD = "combined"
 PATHWAY_SIM_THRESHOLD  <-  0.40    # Min average similarity for pathways to share a module
 PATHWAY_MODULE_LINKAGE <- "average"  # hclust linkage used to build modules
-MODULE_CORE_GENE_FRAC  <- 0.2        # Core genes: in MORE than this fraction of a module's significant pathways
+MODULE_CORE_GENE_FRAC  <- 0.3        # Core genes: in MORE than this fraction of a module's significant pathways
 MODULE_CORE_GENE_MIN_N <- 2          # ... and in at least this many of the module's significant pathways
 # Used in: 12_pathway_activity.R
 
