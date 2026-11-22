@@ -67,6 +67,15 @@ SAMPLE_COLORS <- c(
   "DKO4" = "#880E4F"
 )
 
+# --- CD8+ T subtype palette (03_* scripts) ------------------------------------
+# Assigned to cluster levels in order; no greys, distinct from condition colors.
+TCELL_SUBTYPE_PALETTE <- c("#E69F00", "#009E73", "#CC79A7", "#0072B2", "#D55E00",
+                           "#56B4E9", "#8B6D2E", "#882255", "#44AA99", "#999933")
+tcell_subtype_colors <- function(levels) {
+  stopifnot(length(levels) <= length(TCELL_SUBTYPE_PALETTE))
+  setNames(TCELL_SUBTYPE_PALETTE[seq_along(levels)], levels)
+}
+
 # --- Publication theme --------------------------------------------------------
 theme_publication <- function(base_size = 11) {
   theme_classic(base_size = base_size) %+replace%
