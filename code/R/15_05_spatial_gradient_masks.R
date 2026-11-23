@@ -46,7 +46,7 @@ CD8_GRADIENT   <- c("#9ECAE1", "#08306B")
 # spec's hit list directly instead of a hardcoded set — re-run 15_04 and this
 # updates automatically.
 CONDITION_TEST_CSV <- file.path(PROJECT_DIR, "output", "R", "15_tumor_trajectory_working",
-                                "CD8pos_T", "gam_condition_test_pseudobulk_nb_fs.csv")
+                                "CD8pos_T", "gam_condition_test_pseudobulk_nb.csv")
 GENE_FDR <- 0.1        # keep genes with fdr_shape < GENE_FDR OR fdr_level < GENE_FDR
 
 ct_res <- read.csv(CONDITION_TEST_CSV, stringsAsFactors = FALSE)
